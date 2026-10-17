@@ -798,3 +798,10 @@ html.ios .fatal { margin: calc(env(safe-area-inset-top, 0px) + 20px) 16px 0; wid
     animation-duration: 1ms !important; transition-duration: 1ms !important;
   }
 }
+
+/* With a dashboard the window is as tall as its content; once the screen caps it, the card takes the shadow's margin. */
+html.native.capped #app { padding-bottom: 8px; }
+html.native.capped .card { box-shadow: 0 3px 8px -3px rgba(0, 0, 0, 0.5); }
+.home-badge.opens { pointer-events: auto; transition: background 180ms, transform 240ms var(--spring); }
+@media (hover: hover) { .home-badge.opens:hover { background: rgba(255, 255, 255, 0.16); } }
+.home-badge.opens:active { transform: scale(0.92); }

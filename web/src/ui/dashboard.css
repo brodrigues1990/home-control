@@ -1,0 +1,356 @@
+/* The panel's dashboard (dashboard.json): sections of Home Assistant controls and the plan's
+   lights, in place of the scenes, room filter and device grid. */
+
+.card.has-dash { --stage-h: 430px; }
+.card.has-dash .scenes, .card.has-dash .rooms, .card.has-dash .list-head { display: none; }
+.card.has-dash .devices { padding-top: 10px; }
+
+.dash { display: flex; flex-direction: column; gap: 14px; }
+.dash-sec { display: flex; flex-direction: column; gap: 8px; }
+.dash-title {
+  display: flex; align-items: baseline; gap: 8px;
+  margin: 0 4px;
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase;
+  color: var(--faint);
+}
+.dash-note { text-transform: none; letter-spacing: 0; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+.dash-sec-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.dash-sec-grid > .wide, .dash-lights, .dash-status { grid-column: 1 / -1; }
+.dash-offline {
+  padding: 8px 12px; border-radius: 12px;
+  font-size: 11.5px; color: #ffb4ab;
+  background: rgba(255, 90, 79, 0.1); border: 1px solid rgba(255, 90, 79, 0.3);
+}
+
+/* The plan's lights, as the panel's own tiles, a little more compact. */
+.dash-lights { display: grid; grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr)); gap: 8px; }
+.dash .tile { height: 56px; border-radius: 18px; padding: 0 10px; gap: 9px; animation: none; }
+.dash .tile .bubble { width: 34px; height: 34px; border-radius: 12px; }
+
+/* ---------- control cards ---------- */
+
+.dash .chip {
+  --c: var(--warm);
+  position: relative;
+  min-width: 0;
+  height: 56px;
+  border-radius: 18px;
+  padding: 0 10px;
+  display: flex; align-items: center; gap: 7px;
+  overflow: hidden;
+  background: var(--glass);
+  border: 1px solid var(--line);
+  transition: transform 300ms var(--spring), background 240ms, border-color 240ms, box-shadow 320ms;
+}
+.dash .chip.on {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--c) 26%, transparent), color-mix(in srgb, var(--c) 8%, transparent));
+  border-color: color-mix(in srgb, var(--c) 42%, transparent);
+  box-shadow: 0 12px 26px -16px var(--c);
+}
+.dash .chip.fail { border-color: rgba(255, 90, 79, 0.6); }
+.dash .chip-bubble {
+  flex: none; width: 34px; height: 34px; border-radius: 12px;
+  display: grid; place-items: center;
+  color: var(--muted); background: rgba(255, 255, 255, 0.07);
+  transition: background 240ms, color 240ms, box-shadow 320ms;
+}
+.dash .chip.on .chip-bubble { color: #06162c; background: var(--c); box-shadow: 0 0 18px -3px var(--c); }
+.dash .chip.fan.on .chip-bubble .icon { animation: dash-spin 1.6s linear infinite; }
+@keyframes dash-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .dash .chip.fan.on .chip-bubble .icon { animation: none; } }
+
+.dash .chip-text { flex: 1; min-width: 0; }
+
+/* Two cards side by side (no "wide"): too narrow for one line, so the name and status keep the
+   first line and the controls drop to a second one, on the right. */
+.dash-sec-grid > .chip.dash-card:not(.wide) {
+  height: auto; min-height: 56px; padding: 9px 10px;
+  flex-wrap: wrap; justify-content: flex-end; align-content: center; row-gap: 7px;
+}
+.dash-sec-grid > .chip.dash-card:not(.wide) > .chip-text { flex: 1 1 calc(100% - 41px); }
+/* A computer or a console has one or two buttons: they fit beside the name, so it keeps one line. */
+.dash-sec-grid > .chip.dash-card.pc:not(.wide) { height: 56px; padding: 0 10px; flex-wrap: nowrap; }
+.dash-sec-grid > .chip.dash-card.pc:not(.wide) > .chip-text { flex: 1; }
+.dash .chip-name { font-size: 13px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dash .chip-sub {
+  margin-top: 2px; font-size: 11.5px; color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums;
+}
+.dash .chip.on .chip-sub { color: color-mix(in srgb, var(--c) 55%, #fff); }
+.dash .chip.fail .chip-sub { color: #ff8a80; }
+
+.dash .chip-step, .dash .chip-power {
+  flex: none; width: 28px; height: 28px; border-radius: 9px;
+  display: grid; place-items: center; color: var(--muted);
+  transition: background 180ms, color 180ms, transform 240ms var(--spring), box-shadow 300ms;
+}
+@media (hover: hover) { .dash .chip-step:hover { background: rgba(255, 255, 255, 0.12); color: var(--text); } }
+.dash .chip-step:active, .dash .chip-power:active { transform: scale(0.86); }
+.dash .chip-step.active { background: rgba(255, 255, 255, 0.16); color: var(--text); }
+.dash .chip-power { border-radius: 50%; margin-left: 2px; background: rgba(255, 255, 255, 0.1); }
+.dash .chip.on .chip-power { background: var(--c); color: #06162c; box-shadow: 0 0 14px -4px var(--c); }
+.dash .chip-value { min-width: 32px; text-align: center; font-size: 15px; font-weight: 650; color: var(--text); font-variant-numeric: tabular-nums; }
+.dash .chip:not(.on) .chip-value { color: var(--faint); }
+.dash-vol { min-width: 34px; text-align: center; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* Mode and fan speed of the AC: tap to step to the next one. */
+.dash-opt {
+  font: inherit; color: inherit; padding: 0; background: none; border: 0; cursor: pointer;
+  text-decoration: underline dotted color-mix(in srgb, currentColor 45%, transparent);
+  text-underline-offset: 3px;
+}
+@media (hover: hover) { .dash-opt:hover { color: var(--text); } }
+
+/* A TV's inputs. */
+.dash-src { flex: none; display: flex; gap: 3px; }
+.dash-src[hidden] { display: none; }
+.dash-src button {
+  height: 26px; padding: 0 8px; border-radius: 8px;
+  font-size: 11px; font-weight: 600; color: var(--muted);
+  background: rgba(255, 255, 255, 0.06);
+  transition: background 180ms, color 180ms;
+}
+@media (hover: hover) { .dash-src button:hover { background: rgba(255, 255, 255, 0.12); color: var(--text); } }
+.dash-src button.active { color: #fff; background: color-mix(in srgb, var(--c) 50%, transparent); }
+
+/* How far into the song. */
+.dash .chip-level {
+  position: absolute; left: 0; bottom: 0; height: 3px; width: 100%;
+  transform-origin: left; transform: scaleX(var(--level, 0));
+  background: var(--c); opacity: 0.85;
+  transition: transform 900ms linear;
+}
+
+/* ---------- status ---------- */
+
+.dash-status { display: flex; gap: 6px; }
+.pill-stat {
+  --c: #5fe08a;
+  flex: 1 1 0; min-width: 0;
+  height: 36px; border-radius: 12px; padding: 0 10px;
+  display: flex; align-items: center; gap: 7px;
+  font-size: 11.5px; color: var(--muted); white-space: nowrap;
+  background: var(--glass); border: 1px solid var(--line);
+  transition: background 240ms, border-color 240ms, color 240ms;
+}
+.pill-stat .icon { flex: none; }
+.pill-stat b { color: var(--text); font-weight: 600; flex: none; }
+.pill-stat .v { min-width: 0; margin-left: auto; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.pill-stat .dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: rgba(255, 255, 255, 0.22); }
+.pill-stat.on { color: color-mix(in srgb, var(--c) 60%, #fff); background: color-mix(in srgb, var(--c) 11%, transparent); border-color: color-mix(in srgb, var(--c) 38%, transparent); }
+.pill-stat.on .dot { background: var(--c); box-shadow: 0 0 8px var(--c); }
+
+/* ---------- tabs ---------- */
+
+.dash-tabs {
+  flex: none; display: flex; gap: 2px; padding: 3px;
+  border-radius: 12px; background: rgba(255, 255, 255, 0.07); border: 1px solid var(--line);
+}
+.dash-tab {
+  height: 28px; padding: 0 12px; border-radius: 9px;
+  font-size: 12px; font-weight: 600; color: var(--muted); white-space: nowrap;
+  transition: background 200ms, color 200ms;
+}
+@media (hover: hover) { .dash-tab:hover { color: var(--text); } }
+.dash-tab.active { color: var(--text); background: rgba(255, 255, 255, 0.14); box-shadow: 0 1px 6px -2px rgba(0, 0, 0, 0.6); }
+.dash-pane { display: flex; flex-direction: column; gap: 14px; }
+.dash-pane[hidden] { display: none; }
+
+/* A tab without the 3D model: its content starts under the header. */
+.card.no-model { --stage-h: 112px; }
+.card.no-model .stage, .card.no-model .tint { opacity: 0; pointer-events: none; }
+.card .stage, .card .tint { transition: opacity 260ms ease; }
+
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* ---------- glance (external IP, provider, ping) ---------- */
+
+.dash-glance { grid-column: 1 / -1; display: grid; grid-template-columns: 1.35fr 1fr 0.75fr; gap: 8px; }
+.glance {
+  min-width: 0; padding: 9px 11px 8px; border-radius: 16px;
+  background: var(--glass); border: 1px solid var(--line);
+}
+.glance-label { font-size: 10.5px; font-weight: 600; color: var(--faint); text-transform: uppercase; letter-spacing: 0.06em; }
+.glance-line { display: flex; align-items: center; gap: 4px; margin-top: 3px; min-height: 24px; }
+.glance-value { flex: 1; min-width: 0; font-size: 15px; font-weight: 650; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.glance .chip-step { flex: none; width: 24px; height: 24px; border-radius: 8px; display: grid; place-items: center; color: var(--muted); }
+@media (hover: hover) { .glance .chip-step:hover { background: rgba(255, 255, 255, 0.12); color: var(--text); } }
+.glance-sub { display: flex; align-items: center; gap: 6px; margin-top: 2px; min-width: 0; }
+.glance-detail { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.glance .dot, .dash-link .dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: #e66767; }
+.glance .dot.on, .dash-link .dot.on { background: #5fe08a; box-shadow: 0 0 7px #5fe08a; }
+
+/* ---------- charts ---------- */
+
+.dash-chart, .dash-net {
+  grid-column: 1 / -1; position: relative;
+  padding: 10px 10px 6px; border-radius: 16px;
+  background: var(--glass); border: 1px solid var(--line);
+}
+.chart-head { display: flex; align-items: center; gap: 10px; margin: 0 2px 4px; }
+.chart-title { flex: 1; font-size: 11.5px; font-weight: 600; color: var(--muted); }
+.chart-legend { display: flex; gap: 10px; }
+.chart-key { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted); }
+.chart-key i { width: 12px; height: 2px; border-radius: 1px; background: var(--c); }
+
+.lc { position: relative; }
+.lc svg { display: block; overflow: visible; }
+.lc-grid { stroke: rgba(255, 255, 255, 0.08); stroke-width: 1; }
+.lc-axis { fill: var(--faint); font-size: 10px; font-variant-numeric: tabular-nums; }
+.lc-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.lc-leader { stroke: rgba(255, 255, 255, 0.25); stroke-width: 1; }
+.lc-label { fill: var(--text); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.lc-label-name { fill: var(--muted); font-weight: 500; }
+.lc-hair { stroke: rgba(255, 255, 255, 0.35); stroke-width: 1; }
+.lc-tip {
+  position: absolute; top: 0; z-index: 2; pointer-events: none;
+  min-width: 108px; padding: 7px 9px; border-radius: 10px;
+  background: rgba(14, 18, 30, 0.96); border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 10px 24px -8px rgba(0, 0, 0, 0.7);
+  font-size: 11px; color: var(--muted);
+}
+.lc-tip[hidden] { display: none; }
+.lc-tip-time { margin-bottom: 4px; color: var(--faint); font-variant-numeric: tabular-nums; }
+.lc-tip-row { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.lc-tip-row i { width: 10px; height: 2px; border-radius: 1px; flex: none; }
+.lc-tip-row b { color: var(--text); font-weight: 650; font-variant-numeric: tabular-nums; }
+
+/* ---------- network ---------- */
+
+.net-cells { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 6px; }
+.net-cell { min-width: 0; padding: 0 2px; }
+.net-label { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
+.net-key { width: 12px; height: 2px; border-radius: 1px; background: var(--c); }
+.net-key.sum { height: 0; border-top: 2px dotted var(--muted); background: none; }
+.net-value { margin-top: 2px; display: flex; align-items: baseline; gap: 4px; }
+.net-value b { font-size: 17px; font-weight: 650; color: var(--text); font-variant-numeric: tabular-nums; }
+.net-value small { font-size: 10.5px; color: var(--faint); }
+.net-sub { display: block; font-size: 10.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
+
+/* ---------- container links ---------- */
+
+.dash-links { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr)); gap: 6px; }
+.dash-link {
+  min-width: 0; height: 34px; padding: 0 10px; border-radius: 11px;
+  display: flex; align-items: center; gap: 7px;
+  font-size: 12px; font-weight: 600; color: var(--text); text-align: left;
+  background: var(--glass); border: 1px solid var(--line);
+  transition: background 180ms, transform 240ms var(--spring);
+}
+@media (hover: hover) { .dash-link:hover { background: var(--glass-hi); } }
+.dash-link:active { transform: scale(0.96); }
+.dash-link.plain .dot { background: rgba(255, 255, 255, 0.3); box-shadow: none; }
+.link-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.link-note { font-size: 10.5px; font-weight: 500; color: #ff8a80; }
+.dash-link.down .link-name { color: var(--muted); }
+
+/* The TV: name, volume and power on top, its inputs on a row of their own below. */
+.dash .chip.tv { height: auto; min-height: 56px; flex-wrap: wrap; row-gap: 6px; padding: 9px 10px; }
+.dash .chip.tv .dash-src { order: 10; flex-basis: calc(100% - 41px); margin-left: 41px; }
+.dash .chip.tv .dash-src button { flex: 1; }
+
+/* Light tiles in a row of three: the settings button floats over the tile instead of taking width. */
+.dash .tile .tile-more { position: absolute; right: 6px; top: 6px; margin: 0; background: var(--bg); }
+.dash-link.idle .dot { background: rgba(255, 255, 255, 0.3); box-shadow: none; }
+.dash-link.idle .link-note { color: var(--faint); }
+.dash-link.idle .link-name { color: var(--muted); }
+
+/* ---------- energy: power now and batteries ---------- */
+
+.dash-power, .dash-batteries {
+  grid-column: 1 / -1; padding: 10px 12px; border-radius: 16px;
+  background: var(--glass); border: 1px solid var(--line);
+}
+.pw-head { display: flex; align-items: flex-end; gap: 14px; margin-bottom: 10px; }
+.pw-total { flex: none; }
+.pw-label { font-size: 11px; color: var(--muted); }
+.pw-total b { font-size: 22px; font-weight: 650; color: var(--text); font-variant-numeric: tabular-nums; }
+.pw-total small { margin-left: 3px; font-size: 11px; color: var(--faint); }
+.pw-spark { flex: 1; min-width: 0; }
+
+.bar-list, .dash-batteries { display: flex; flex-direction: column; gap: 7px; }
+.bar-row { display: grid; grid-template-columns: 112px 1fr 64px; align-items: center; gap: 10px; font-size: 11.5px; }
+.bar-row[hidden] { display: none; }
+.bar-name { color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bar-track { height: 10px; border-radius: 0 4px 4px 0; background: rgba(255, 255, 255, 0.05); overflow: hidden; }
+.bar-fill { display: block; height: 100%; width: 0; border-radius: 0 4px 4px 0; transition: width 500ms var(--ease); }
+.bar-value { text-align: right; color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.bar-value.low { color: #ff8a80; }
+.bar-row.missing .bar-name, .bar-row.missing .bar-value { color: var(--faint); }
+.bat-end { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
+.bat-bolt { display: grid; color: var(--muted); }
+.bat-bolt[hidden] { display: none; }
+
+
+/* A computer's wake button (shown while it is off). */
+.dash-wake {
+  flex: none; height: 30px; padding: 0 12px; border-radius: 999px;
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 650; color: #fff;
+  background: linear-gradient(180deg, #8b7bff, #6a58f0);
+  box-shadow: 0 6px 16px -8px rgba(139, 123, 255, 0.9);
+  transition: transform 240ms var(--spring), opacity 200ms;
+}
+.dash-wake[hidden] { display: none; }
+.dash-wake:active { transform: scale(0.94); }
+.dash-wake:disabled { opacity: 0.6; }
+.dash-wake.alt { background: rgba(255, 255, 255, 0.1); color: var(--text); box-shadow: none; }
+.dash-wake.alt.active { background: color-mix(in srgb, #60a5fa 45%, transparent); }
+
+/* No "everything on / off" button in the header when a dashboard drives the panel. */
+.card.has-dash header.top > .power { display: none; }
+
+/* ---------- the 1º andar: washer, shortcuts, switches ---------- */
+
+.dash .chip.washer { height: auto; min-height: 56px; flex-wrap: wrap; row-gap: 6px; padding: 9px 10px; }
+.washer-row { order: 10; flex-basis: calc(100% - 41px); margin-left: 41px; display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); }
+.washer-row .dash-opt { margin-right: 10px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px; }
+.washer-k { color: var(--faint); }
+.washer-stats { order: 11; flex-basis: calc(100% - 41px); margin-left: 41px; font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; }
+.washer-stats:empty { display: none; }
+.washer-row[hidden] { display: none; }
+.dash-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; }
+.dash-action {
+  height: 30px; padding: 0 11px; border-radius: 999px;
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11.5px; font-weight: 600; color: var(--text);
+  background: var(--glass); border: 1px solid var(--line);
+  transition: background 180ms, transform 240ms var(--spring);
+}
+@media (hover: hover) { .dash-action:hover { background: var(--glass-hi); } }
+.dash-action:active { transform: scale(0.95); }
+.dash .chip.tv .dash-src { flex-wrap: wrap; }
+.dash .chip.tv .dash-src button { flex: 1 1 64px; }
+
+/* ---------- iPhone and iPad (the same dashboard, from the Mac) ---------- */
+
+/* A phone is too narrow for the title, the tabs and the settings button on one line: the tabs
+   take a second row under the title, spread across the width. */
+@media (max-width: 560px) {
+  html.ios .card.has-dash .top { flex-wrap: wrap; row-gap: 10px; }
+  html.ios .card.has-dash .top > .dash-tabs { order: 10; flex: 1 0 100%; }
+  html.ios .card.has-dash .top > .dash-tabs .dash-tab { flex: 1; height: 32px; font-size: 13px; }
+  html.ios .card.has-dash { --stage-h: 470px; }
+  /* A tab without the model starts right under the header (title and tabs). */
+  html.ios .card.has-dash.no-model { --stage-h: calc(var(--safe-top) + 140px); }
+  /* Three lights to a row: the icon above the name, like the Home app's tiles, so the name has the
+     tile's whole width. */
+  html.ios .dash .dash-lights.many .tile { flex-direction: column; align-items: flex-start; justify-content: center; height: auto; padding: 11px 10px; gap: 8px; }
+  html.ios .dash .dash-lights.many .tile-text { width: 100%; }
+  html.ios .dash .dash-lights.many .tile-name { font-size: 13px; }
+  /* Two cards to a row: their status may take two lines (the AC's mode, fan and room temperature). */
+  html.ios .dash-sec-grid > .chip.dash-card:not(.wide) .chip-sub { white-space: normal; }
+  /* A computer showing CPU and GPU has no room for them beside its buttons: the buttons drop
+     below the status, which then has the card's whole width (the owner: "no space for cpu and gpu"). */
+  html.ios .dash-sec-grid > .chip.dash-card.pc.stats:not(.wide) { height: auto; min-height: 60px; padding: 9px 10px; flex-wrap: wrap; justify-content: flex-end; align-content: center; row-gap: 7px; }
+  html.ios .dash-sec-grid > .chip.dash-card.pc.stats:not(.wide) > .chip-text { flex: 1 1 calc(100% - 41px); }
+  /* A player has too many buttons for one line: title and artist above, the buttons below. */
+  html.ios .dash .chip.media { height: auto; padding: 9px 10px; flex-wrap: wrap; justify-content: flex-end; row-gap: 7px; }
+  html.ios .dash .chip.media > .chip-text { flex: 1 1 calc(100% - 41px); }
+}
+html.ios .dash .chip { min-height: 60px; }
+
+/* An iPad upright has room for a taller model than a phone. */
+@media (orientation: portrait) and (min-width: 700px) {
+  html.ios .card.has-dash { --stage-h: max(470px, 46vh); }
+}

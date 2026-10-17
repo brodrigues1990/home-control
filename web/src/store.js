@@ -70,8 +70,11 @@ export function createStore(config) {
   const outbox = new Map();
 
   function transmit(kind, id, patch) {
-    if (!isNative) return Promise.resolve();
     const current = kind === 'light' ? state.lights[id] : state.acs[id];
+    // A device the dashboard drives itself (an infrared AC behind a script).
+    const custom = store.handlers.get(id);
+    if (custom) return custom(patch, { ...current });
+    if (!isNative) return Promise.resolve();
     const sent = call('command', { kind, id, patch, state: { ...current } });
     // Never let a lost reply block the device for good.
     return Promise.race([sent, new Promise((resolve) => setTimeout(resolve, 20000))]);
@@ -177,6 +180,8 @@ export function createStore(config) {
     onDeviceError: null,
     /** Who is changing things right now when it is not the person at this screen ("ChatGPT"…). */
     source: null,
+    /** Device id -> (patch, state) => Promise, for devices sent elsewhere than the native shell. */
+    handlers: new Map(),
 
     /** What the panel may offer for this AC: modes, fan speeds, and the optional extras. */
     acFeatures(id) {

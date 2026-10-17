@@ -1,0 +1,46 @@
+# The dashboard
+
+An optional `dashboard.json` in the data folder (`~/Library/Application Support/HouseControl/`) turns the panel's
+device grid into tabs of Home Assistant controls: a fan or an infrared AC driven by scripts, media players, status
+rows, charts and links, laid out beside the plan's own lights. Without the file the panel is unchanged.
+Use **Reload** in the menu (or relaunch) after editing it. Ported from a friend's fork, [asantos](https://github.com/alsantos123/house-control-asantos).
+
+## Safety
+
+- Every entity id the file names is the **allowlist**: the panel may read and call only those, in the domains
+  `script, switch, light, fan, climate, media_player, sensor, binary_sensor, device_tracker, input_boolean,
+  input_select, input_number, select, number, button, sun`. Every call is written to `events.log`.
+- Only the `http(s)` links the file lists can be opened from the panel.
+- `homeassistant-blocked.json` (same folder): a JSON array of entity ids the app must never list or switch,
+  for example the plug that powers this Mac or the router. Read on every use.
+- `"menuBar": "<temperature sensor>"` shows that temperature beside the menu bar icon;
+  `"panel": {"width": 520, "height": 800}` sets the card size (the height then follows the content).
+  `"temperature"` names the room thermometer the panel header shows.
+
+## Format
+
+The top level holds `panel {width, height}`, `watch` (extra entities the 3D model needs,
+for example `sun.sun`, `sensor.office_vent_status`, the C2, and
+`binary_sensor.pc_gamer_online`) and `tabs: [{title, model?, sections: [{title,
+temperature?, widgets: [...]}]}]`.
+
+Widget types:
+
+| type | fields |
+| --- | --- |
+| `fan` | `status`, `watts`, scripts `on`, `off`, `plus`, `minus`, `reverse` |
+| `ac` | `script` (fields `ligado`, `modo`, `temperatura`, `ventilacao`, `sleep`), helpers `power`, `mode`, `fan`, `target`, `sleep`; `room`, `watts`; `plan` (id of the plan AC it stands behind) |
+| `media` | `entity` (Music Assistant player), optional `favorite {press (button), state (binary_sensor)}` heart |
+| `tv` | `entity`, `screen` (switch), optional `sources` labels, `hideSources`, `playPause` |
+| `toggle` | `name`, `icon`, `entity` (switch), `watts` (sensor): on/off with its draw |
+| `actions` | `script`, shared `variables`, `items[{label, icon?, variables, script?}]`: a row of one-tap script chips |
+| `washer` | `script` (+ `fields.action`, verbs iniciar/pausar/acordar/desligar), `status`, `remaining`, `remoteStart`, `course` (select, picked from a pop-up menu), `delay` (number, the delayed end in h), `cycles`, `tubClean`, `energyToday`, `energyMonth`, `labels` |
+| `status` | `items[{name, icon, entity, off[], labels{}, above, unit, remaining, color}]` |
+| `lights` | `ids` (plan light ids), `columns` |
+| `glance` | `items[{name, entity, copy, detail (attribute), strip (regex), status, unit, decimals, note}]` |
+| `chart` | `series[{name, entity}]`, `hours`, `unit`, `max` |
+| `net` | `up`, `down`, `unit`, `hours` |
+| `links` | `items[{name, url, status, above, onDemand}]`, `columns` |
+| `power` | `items[{name, entity}]`, `hours` |
+| `batteries` | `items[{name, entity, attribute, charging, hideUnavailable, low}]` |
+| `countdown` | `status` (template sensor `sensor.countdowns`, its `ativos` attribute lists the running timers), `topic` (input_select of ntfy topics), scripts `start`, `pause`, `resume`, `stop` (all take `minutos`), `minutes` (the chips; default 5…60) |

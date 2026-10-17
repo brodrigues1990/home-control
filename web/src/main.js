@@ -62,7 +62,13 @@ async function boot() {
   }
 
   let world;
+  let modelShown = true; // false on a dashboard tab without the 3D model
   const panel = createPanel(app, config, store, {
+    onModel(on) {
+      modelShown = on;
+      world?.setRunning(on && !document.hidden);
+      if (on) world?.resize();
+    },
     onFocus: (target) => world?.focus(target),
     onMenu: (anchor, reason) => {
       if (reason === 'escape') post('close');
@@ -93,10 +99,11 @@ async function boot() {
   applyInsets();
   new ResizeObserver(() => (isPhone ? applyInsets() : world.resize())).observe(panel.canvas);
 
-  const show = () => { world.setRunning(true); world.intro(); };
+  const show = () => { world.setRunning(modelShown); if (modelShown) world.intro(); panel.setActive(true); };
   const hide = () => { world.setRunning(false); };
   incoming.shown = show;
-  incoming.hidden = () => { hide(); panel.closeSheet(); if (panel.room !== 'all') panel.selectRoom('all'); };
+  incoming.hidden = () => { hide(); panel.setActive(false); panel.closeSheet(); if (panel.room !== 'all') panel.selectRoom('all'); };
+  incoming.haChanged = () => panel.dashChanged();
   incoming.setNotch = (x) => panel.setNotch(x);
   if (isPhone) {
     // Swiping in from the left edge goes back from a device sheet, as it does everywhere on iOS.
@@ -153,7 +160,7 @@ async function boot() {
     haptic('error');
   };
   // The loop pauses whenever the page is hidden; any sign of life resumes it.
-  const resume = () => { if (!document.hidden) world.setRunning(true); };
+  const resume = () => { if (!document.hidden && modelShown) world.setRunning(true); };
   document.addEventListener('visibilitychange', () => (document.hidden ? hide() : resume()));
   for (const type of ['focus', 'pageshow', 'pointermove', 'pointerdown']) window.addEventListener(type, resume, { passive: true });
 

@@ -6,7 +6,8 @@ import { icon } from './icons.js';
 import { lightColor } from '../three/lights.js';
 import { MODE_COLORS } from '../three/ac.js';
 import { AC_SWINGS } from '../store.js';
-import { haptic, isPhone } from '../bridge.js';
+import { haptic, isPhone, post } from '../bridge.js';
+import { createDashboard } from './dashboard.js';
 
 const MODE_LABEL = { cool: 'Cool', heat: 'Heat', dry: 'Dry', fan: 'Fan', auto: 'Auto' };
 const FAN_LABEL = { auto: 'Auto', low: 'Low', medium: 'Medium', high: 'High', turbo: 'Turbo' };
@@ -31,7 +32,7 @@ function acTemperatureColor(target, cfg) {
   return tmp.set('#1c4fc0').lerp(new THREE.Color('#8a3d12'), t).clone();
 }
 
-export function createPanel(root, config, store, { onFocus, onMenu }) {
+export function createPanel(root, config, store, { onFocus, onMenu, onModel = () => {} }) {
   const { state } = store;
   const ui = { room: 'all', sheet: null };
   let world = null;
@@ -66,7 +67,8 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
     h('div.stage', canvas),
     h('div.tint'),
     h('header.top',
-      h('div.home', h('div.home-badge', icon('home', 17)),
+      // The badge opens Home Assistant: its app when installed, else the server in the browser.
+      h('div.home', h('button.home-badge.opens', { title: 'Open Home Assistant', 'aria-label': 'Open Home Assistant', onclick: () => { haptic('light'); post('homeAssistant.open'); } }, icon('home', 17)),
         h('div', h('div.home-name', config.name), homeSub)),
       aiBadge, gear, power),
     tooltip, panel, sheet, toastEl);
@@ -126,6 +128,9 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
   /* ---------- tiles ---------- */
 
   const tiles = new Map();
+  let dash = null; // dashboard.json: sections of Home Assistant controls instead of the device grid
+  let liveStates = null;
+  let built = false; // the whole panel exists (see the end of createPanel)
 
   function lightTile(cfg) {
     const dimmable = cfg.capabilities.includes('brightness');
@@ -197,7 +202,7 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
         el.style.setProperty('--c', css(lightColor(s, tmp)));
         el.style.setProperty('--level', s.on ? String(s.brightness) : '0');
         // On a phone the group heading above the tile already names the room.
-        sub.textContent = ui.room === 'all' && !isPhone ? `${lightStatus(cfg, s)} · ${roomName.get(cfg.room)}` : lightStatus(cfg, s);
+        sub.textContent = ui.room === 'all' && !isPhone && !dash ? `${lightStatus(cfg, s)} · ${roomName.get(cfg.room)}` : lightStatus(cfg, s);
       },
     };
   }
@@ -238,6 +243,54 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
   for (const cfg of config.acs) tiles.set(cfg.id, acTile(cfg));
   for (const cfg of config.lights) tiles.set(cfg.id, lightTile(cfg));
 
+  const dashSpec = window.__HOUSE_BOOT__?.dashboard;
+  if (dashSpec?.sections?.length || dashSpec?.tabs?.length) {
+    // A tab with `"model": false` (NAS) gives the whole card to its content, except on an iPad in
+    // landscape: the model has its own side there, so it stays beside every tab.
+    const sideBySide = isPhone ? matchMedia('(orientation: landscape) and (min-width: 900px)') : null;
+    let currentTab = null;
+    const applyTab = () => {
+      const model = currentTab?.model !== false || Boolean(sideBySide?.matches);
+      card.classList.toggle('no-model', !model);
+      onModel(model);
+      dash?.onLayout?.();
+    };
+    sideBySide?.addEventListener('change', applyTab);
+    dash = createDashboard(dashSpec, {
+      chips: new Map([...tiles].map(([id, t]) => [id, t.el])),
+      onTab: (tab) => { currentTab = tab; applyTab(); },
+      // Home Assistant's latest states, for the header's temperature.
+      // (the first states arrive while the panel is still being built: refresh it only once it is)
+      onStates: (get) => { liveStates = get; if (built) update(); },
+      onPlanAC: (id, s, features) => store.applyRemote({ acs: { [id]: s }, features: { [id]: features } }),
+      // a pop-up list (the washer's programmes), drawn like the AC's mode menu
+      menu: (anchor, items) => openMenu(clip, anchor, items.map((i) => ({ ...i, icon: i.selected ? icon('check', 16, 2.4) : null }))),
+    });
+    for (const [id, send] of dash.planACs) store.handlers.set(id, send);
+    card.classList.add('has-dash');
+    grid.replaceWith(dash.el);
+    if (dash.tabBar) aiBadge.before(dash.tabBar);
+
+    // The panel is as tall as its content: header and model, plus everything in the open tab.
+    // The native side caps it at the screen's height, and past that the content scrolls.
+    let wanted = 0;
+    // Once capped, the window still keeps the bottom margin meant for the card's shadow, which
+    // left a strip of empty screen under the panel: the card takes that margin instead (`capped`).
+    const NATIVE_PAD = 13 + 34; // `html.native #app` padding, top + bottom (PanelController's padTop/padBottom)
+    const capped = () => document.documentElement.classList.toggle('capped', !isPhone && wanted > 0 && innerHeight < wanted + NATIVE_PAD - 1);
+    const fitHeight = () => {
+      const devices = dash.el.parentElement;
+      const cs = getComputedStyle(devices);
+      const chrome = card.clientHeight - devices.clientHeight;
+      const want = Math.ceil(chrome + parseFloat(cs.paddingTop) + dash.el.offsetHeight + parseFloat(cs.paddingBottom));
+      if (card.clientHeight && Math.abs(want - wanted) >= 2) { wanted = want; post('panelHeight', { height: want }); }
+      capped();
+    };
+    addEventListener('resize', capped);
+    new ResizeObserver(() => requestAnimationFrame(fitHeight)).observe(dash.el);
+    dash.onLayout = () => requestAnimationFrame(fitHeight);
+  }
+
   function toggleLight(id) {
     haptic('light');
     world?.lights.get(id)?.bump();
@@ -245,6 +298,7 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
   }
 
   function layoutTiles() {
+    if (dash) return; // the dashboard places the tiles itself
     const nodes = [];
     let i = 0;
     const add = (t) => { t.el.style.setProperty('--i', i++); nodes.push(t.el); };
@@ -520,9 +574,14 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
     const acsOn = Object.values(state.acs).filter((a) => a.on);
     const anyOn = onCount > 0 || acsOn.length > 0;
 
+    const roomTemp = dashSpec?.temperature ? Number(liveStates?.(dashSpec.temperature)?.state) : NaN;
     homeSub.replaceChildren(
       h('span.live', { style: anyOn ? {} : { background: 'rgba(255,255,255,.25)', boxShadow: 'none' } }),
-      h('b', onCount ? `${onCount} of ${lights.length}` : 'No'), ' lights on',
+      // With a dashboard that names a room thermometer, the header gives the temperature instead
+      // of the count of lights on.
+      ...(dashSpec?.temperature
+        ? ['Temp. ', h('b', Number.isFinite(roomTemp) ? `${Math.round(roomTemp)}°` : '–')]
+        : [h('b', onCount ? `${onCount} of ${lights.length}` : 'No'), ' lights on']),
       acsOn.length ? ` · AC ${acsOn[0].target}°` : '');
     power.classList.toggle('on', anyOn);
 
@@ -551,6 +610,7 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
   });
 
   layoutTiles();
+  built = true;
   update();
 
   return {
@@ -565,6 +625,10 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
     get room() { return ui.room; },
     setNotch(x) { card.style.setProperty('--notch-x', `${x}px`); },
     setAgentLive(live) { aiBadge.hidden = !live; },
+    /** The panel opened or closed: the dashboard reads Home Assistant only while it is open. */
+    setActive(on) { dash?.setActive(on); },
+    /** Home Assistant reported a change to one of the dashboard's entities. */
+    dashChanged() { dash?.changed(); },
     /** `ai`: something an AI assistant did (who, what), instead of an error. */
     toast(text, ai = null) {
       toastEl.replaceChildren(...(ai ? [h('span.toast-ai', icon('sparkles', 13, 2.2), ai), h('span', text)] : [text]));

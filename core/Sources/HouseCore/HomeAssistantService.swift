@@ -28,6 +28,13 @@ public final class HomeAssistantService: DeviceService {
     /// The entities linked in the plan: only their changes are worth a read.
     private var watched: Set<String> = []
     private var changePending = false
+    /// Entities the island's dashboard shows (fan, AC remote, media players, status): their
+    /// changes are reported through `onDashboardChange` rather than as device changes.
+    public var dashboardEntities: Set<String> = []
+    public var onDashboardChange: (() -> Void)?
+    /// Every new state of a dashboard entity as it arrives: (entity id, state).
+    public var onDashboardState: ((String, String) -> Void)?
+    private var dashboardPending = false
 
     public init(vault: SecretStore) {
         self.vault = vault
@@ -107,8 +114,26 @@ public final class HomeAssistantService: DeviceService {
 
     // MARK: - Devices
 
+    /// Entities that must never be listed or switched, e.g. the plug that powers this Mac or the
+    /// router: `homeassistant-blocked.json` in the data folder, a JSON array of entity ids.
+    /// Read on every use, so editing the file takes effect without restarting.
+    static func blockedEntities() -> Set<String> {
+        let directory: URL
+        if let custom = ProcessInfo.processInfo.environment["HOUSE_DATA_DIR"], !custom.isEmpty {
+            directory = URL(fileURLWithPath: (custom as NSString).expandingTildeInPath, isDirectory: true)
+        } else {
+            directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("HouseControl", isDirectory: true)
+        }
+        guard let data = try? Data(contentsOf: directory.appendingPathComponent("homeassistant-blocked.json")),
+              let ids = try? JSONSerialization.jsonObject(with: data) as? [String] else { return [] }
+        return Set(ids)
+    }
+
     public func devices() async throws -> [ServiceDevice] {
-        let states = try await request("GET", "/api/states") as? [[String: Any]] ?? []
+        let blocked = Self.blockedEntities()
+        let states = (try await request("GET", "/api/states") as? [[String: Any]] ?? [])
+            .filter { !blocked.contains($0["entity_id"] as? String ?? "") }
         let areas = (try? await areaNames(for: states.compactMap { $0["entity_id"] as? String })) ?? [:]
         return states.compactMap { state in
             guard var device = Self.device(from: state) else { return nil }
@@ -145,7 +170,65 @@ public final class HomeAssistantService: DeviceService {
         return out
     }
 
+    /// The raw state of each of `ids` (blocked entities left out): `{state, attributes}`.
+    public func states(_ ids: Set<String>) async throws -> [String: [String: Any]] {
+        guard !ids.isEmpty else { return [:] }
+        let blocked = Self.blockedEntities()
+        let states = try await request("GET", "/api/states") as? [[String: Any]] ?? []
+        var out: [String: [String: Any]] = [:]
+        for state in states {
+            guard let id = state["entity_id"] as? String, ids.contains(id), !blocked.contains(id) else { continue }
+            out[id] = ["state": state["state"] ?? "", "attributes": state["attributes"] ?? [:],
+                       "last_changed": state["last_changed"] ?? ""]
+        }
+        return out
+    }
+
+    /// The numeric history of each of `ids` over the last `hours`: `[[epoch ms, value]]`,
+    /// oldest first. Readings that are not numbers ("unavailable") are left out.
+    public func history(_ ids: Set<String>, hours: Double) async throws -> [String: [[Double]]] {
+        let blocked = Self.blockedEntities()
+        let wanted = ids.subtracting(blocked).sorted()
+        guard !wanted.isEmpty else { return [:] }
+        let start = Date().addingTimeInterval(-hours * 3600)
+        let stamp = ISO8601DateFormatter().string(from: start)
+        let path = "/api/history/period/\(stamp)?filter_entity_id=\(wanted.joined(separator: ","))&minimal_response&no_attributes"
+        let series = try await request("GET", path) as? [[[String: Any]]] ?? []
+        let parse = ISO8601DateFormatter()
+        parse.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let plain = ISO8601DateFormatter()
+        var out: [String: [[Double]]] = [:]
+        for points in series {
+            guard let id = points.first?["entity_id"] as? String else { continue }
+            out[id] = points.compactMap { point in
+                guard let text = point["state"] as? String, let value = Double(text),
+                      let when = point["last_changed"] as? String,
+                      let date = parse.date(from: when) ?? plain.date(from: when) else { return nil }
+                return [date.timeIntervalSince1970 * 1000, value]
+            }
+        }
+        return out
+    }
+
+    /// The state of one entity (nil when unknown or blocked).
+    public func state(of id: String) async throws -> String? {
+        guard !Self.blockedEntities().contains(id) else { return nil }
+        return (try await request("GET", "/api/states/\(id)") as? [String: Any])?["state"] as? String
+    }
+
+    /// Calls a service. The caller decides what may be called; blocked entities never are.
+    public func callService(domain: String, service: String, data: [String: Any]) async throws {
+        let target = data["entity_id"] as? String ?? (domain == "script" ? "script.\(service)" : "")
+        guard !Self.blockedEntities().contains(target) else {
+            throw ServiceFailure("\(target) is blocked in homeassistant-blocked.json")
+        }
+        try await request("POST", "/api/services/\(domain)/\(service)", body: data)
+    }
+
     public func send(kind: DeviceKind, id: String, patch: [String: Any], state: [String: Any]) async throws {
+        guard !Self.blockedEntities().contains(id) else {
+            throw ServiceFailure("\(id) is blocked in homeassistant-blocked.json")
+        }
         for call in Self.calls(for: id, patch: patch, state: state,
                                fans: fanNames[id] ?? [:], modes: modeNames[id] ?? [:]) {
             _ = try await request("POST", "/api/services/\(call.domain)/\(call.service)", body: call.data)
@@ -379,8 +462,20 @@ public final class HomeAssistantService: DeviceService {
                 let message = try await task.receive()
                 guard case .string(let text) = message,
                       let event = (try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any])?["event"] as? [String: Any],
-                      let entity = (event["data"] as? [String: Any])?["entity_id"] as? String,
-                      watched.contains(entity), !changePending else { continue }
+                      let entity = (event["data"] as? [String: Any])?["entity_id"] as? String else { continue }
+                if dashboardEntities.contains(entity),
+                   let state = ((event["data"] as? [String: Any])?["new_state"] as? [String: Any])?["state"] as? String {
+                    onDashboardState?(entity, state)
+                }
+                if dashboardEntities.contains(entity), !dashboardPending {
+                    dashboardPending = true
+                    Task { @MainActor [weak self] in
+                        try? await Task.sleep(nanoseconds: 250_000_000)
+                        self?.dashboardPending = false
+                        self?.onDashboardChange?()
+                    }
+                }
+                guard watched.contains(entity), !changePending else { continue }
                 // A burst of changes (a scene) becomes one read.
                 changePending = true
                 Task { @MainActor [weak self] in

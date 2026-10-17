@@ -77,15 +77,19 @@ public struct SyncState {
     /// phone controls the same devices without setting anything up. Only ever sent over this
     /// channel, which nothing but a paired phone can open. Nil from a Mac that predates them.
     public var connections: [String: Any]?
+    /// The Mac's dashboard.json byte for byte (the panel's tabs of Home Assistant controls), so the
+    /// phone shows the same dashboard. Small, so it rides along with every state.
+    public var dashboard: Data?
 
     public init(macName: String, revision: String, plan: Data?, userCode: String, smartLifeConnected: Bool,
-                connections: [String: Any]? = nil) {
+                connections: [String: Any]? = nil, dashboard: Data? = nil) {
         self.macName = macName
         self.revision = revision
         self.plan = plan
         self.userCode = userCode
         self.smartLifeConnected = smartLifeConnected
         self.connections = connections
+        self.dashboard = dashboard
     }
 
     func message(includingPlan: Bool) -> [String: Any] {
@@ -93,6 +97,7 @@ public struct SyncState {
                                   "userCode": userCode, "smartLife": smartLifeConnected]
         if includingPlan, let plan, let text = String(data: plan, encoding: .utf8) { out["plan"] = text }
         if let connections { out["connections"] = connections }
+        if let dashboard, let text = String(data: dashboard, encoding: .utf8) { out["dashboard"] = text }
         return out
     }
 
@@ -103,7 +108,8 @@ public struct SyncState {
                   plan: (message["plan"] as? String).map { Data($0.utf8) },
                   userCode: message["userCode"] as? String ?? "",
                   smartLifeConnected: message["smartLife"] as? Bool ?? false,
-                  connections: message["connections"] as? [String: Any])
+                  connections: message["connections"] as? [String: Any],
+                  dashboard: (message["dashboard"] as? String).map { Data($0.utf8) })
     }
 }
 

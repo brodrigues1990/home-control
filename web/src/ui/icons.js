@@ -5,6 +5,7 @@ import {
   Tv, BedDouble, Palette, RefreshCw, X,
   ShieldCheck, Link2, Copy, MessageSquareText, BookOpen, Terminal, RotateCcw, Globe, Laptop, Clock, Box, Download,
   Undo2, Activity, KeyRound, ArrowUpRight, Camera, Square,
+  Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Music, Monitor, MonitorOff, WashingMachine, ArrowLeftRight, Zap, Heart, BellRing, Gamepad2,
   HouseWifi, Smartphone, Radar, CircleCheck, CircleAlert, ChevronRight, Unlink, LoaderCircle, Router,
   List, Trash2, Scan, Redo2, Map as MapIcon, DoorClosed, Armchair,
 } from 'lucide';
@@ -22,6 +23,8 @@ const ICONS = {
   activity: Activity, key: KeyRound, external: ArrowUpRight, camera: Camera, stop: Square,
   homeassistant: HouseWifi, phone: Smartphone, radar: Radar, ok: CircleCheck, alert: CircleAlert,
   next: ChevronRight, unlink: Unlink, spinner: LoaderCircle, bridge: Router, bulb: Lightbulb,
+  play: Play, pause: Pause, prev: SkipBack, skip: SkipForward, volume: Volume2, mute: VolumeX, music: Music,
+  monitor: Monitor, monitorOff: MonitorOff, washer: WashingMachine, reverse: ArrowLeftRight, zap: Zap, heart: Heart, bell: BellRing, gamepad: Gamepad2,
   list: List, trash: Trash2, fit: Scan, redo: Redo2, map: MapIcon, opening: DoorClosed, furniture: Armchair,
 };
 

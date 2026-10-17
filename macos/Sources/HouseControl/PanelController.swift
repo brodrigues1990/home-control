@@ -9,7 +9,8 @@ private final class FloatingPanel: NSPanel {
 /// The borderless popover under the menu bar icon. The web content draws the card
 /// (rounded corners, notch, shadow) itself on a fully transparent window.
 final class PanelController: NSObject, NSWindowDelegate {
-    private static let card = NSSize(width: 440, height: 800)
+    /// The card's size; a dashboard makes it bigger (see `resize`).
+    private var card = NSSize(width: 440, height: 800)
     // Transparent margin around the card, matching `html.native #app` padding in style.css.
     private static let padTop: CGFloat = 13, padSide: CGFloat = 24, padBottom: CGFloat = 34
 
@@ -24,7 +25,7 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     init(host: WebHost) {
         self.host = host
-        let size = NSSize(width: Self.card.width + Self.padSide * 2, height: Self.card.height + Self.padTop + Self.padBottom)
+        let size = NSSize(width: 440 + Self.padSide * 2, height: 800 + Self.padTop + Self.padBottom)
         window = FloatingPanel(contentRect: NSRect(origin: .zero, size: size),
                                styleMask: [.borderless, .nonactivatingPanel, .fullSizeContentView],
                                backing: .buffered, defer: false)
@@ -42,6 +43,30 @@ final class PanelController: NSObject, NSWindowDelegate {
         window.alphaValue = 0
     }
 
+    /// A new card size (dashboard.json changed). Takes effect the next time the panel opens.
+    func resize(card size: NSSize) {
+        guard size != card else { return }
+        card = size
+        window.setContentSize(NSSize(width: size.width + Self.padSide * 2, height: size.height + Self.padTop + Self.padBottom))
+    }
+
+    /// Where the open panel hangs from (under the menu bar icon) and the screen it is on.
+    private var anchorTop: CGFloat?
+    private var visibleFrame: NSRect?
+
+    /// The page measured its content: the card takes that height, up to what the screen has
+    /// (then the content scrolls). The top stays under the menu bar icon.
+    func fit(cardHeight: CGFloat) {
+        let height = max(420, cardHeight.rounded())
+        guard abs(height - card.height) >= 1 else { return }
+        card.height = height
+        guard isVisible, let top = anchorTop, let visible = visibleFrame else { return }
+        var frame = window.frame
+        frame.size.height = min(height + Self.padTop + Self.padBottom, visible.height - 4)
+        frame.origin.y = (top - frame.size.height + 3).rounded()
+        window.setFrame(frame, display: true)
+    }
+
     func toggle(below button: NSStatusBarButton) {
         if isVisible { hide(); return }
         // The click that dismissed the panel (resign key) must not immediately reopen it.
@@ -56,10 +81,12 @@ final class PanelController: NSObject, NSWindowDelegate {
         let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
 
         var size = window.frame.size
-        size.height = min(Self.card.height + Self.padTop + Self.padBottom, visible.height - 4)
+        size.height = min(card.height + Self.padTop + Self.padBottom, visible.height - 4)
         var x = anchor.midX - size.width / 2
         x = max(visible.minX + 4 - Self.padSide, min(x, visible.maxX - size.width - 4 + Self.padSide))
         let y = anchor.minY - size.height + 3
+        anchorTop = anchor.minY
+        visibleFrame = visible
         window.setFrame(NSRect(x: x.rounded(), y: y.rounded(), width: size.width, height: size.height), display: true)
 
         host.call("setNotch", Double(anchor.midX - x - Self.padSide))

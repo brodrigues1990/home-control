@@ -34,6 +34,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return agent
     }()
     private var lastSummary: [String: Any] = [:]
+    /// dashboard.json: the panel's extra Home Assistant controls (nil: the panel shows scenes).
+    private var dashboard: Dashboard?
+    /// The temperature the menu bar shows (dashboard.json `menuBar`), kept current from HA.
+    private var menuBarTemperature: Double?
+    private var menuBarTimer: Timer?
     /// The Smart Life User Code a paired iPhone signed in with, to save typing it here.
     private var phoneUserCode = ""
     /// Desktop widgets and Control Center controls: what they show, what they asked for.
@@ -58,6 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel = PanelController(host: host)
         panel.onVisibilityChange = { [weak self] visible in self?.setPolling(visible) }
         hub.onStale = { [weak self] in self?.poll() }
+        loadDashboard() // before the page loads: its boot payload carries the dashboard
         widgets.onActions = { [weak self] run, adopt in
             guard let self else { return }
             if !run.isEmpty { self.panel.host.call("widget", run) }
@@ -148,8 +154,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let lights = summary["lightsOn"] as? Int ?? 0
         let acOn = summary["acOn"] as? Int ?? 0
         var parts: [String] = []
-        if lights > 0 { parts.append("\(lights)") }
-        if acOn > 0, let target = summary["acTarget"] as? Int { parts.append("\(target)°") }
+        if dashboard?.menuBarEntity != nil {
+            // the room, always (dashboard.json `menuBar`); never the AC's target in its place
+            if let temperature = menuBarTemperature { parts.append("\(Int(temperature.rounded()))°") }
+        } else {
+            if lights > 0 { parts.append("\(lights)") }
+            if acOn > 0, let target = summary["acTarget"] as? Int { parts.append("\(target)°") }
+        }
         let house = lights > 0 || acOn > 0 ? "house.fill" : "house"
         button.image = agent.isLive ? pair(house, "sparkles") : symbol(house)
         button.attributedTitle = NSAttributedString(
@@ -228,6 +239,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !smartLife.isSmartLifeConnected, !phoneUserCode.isEmpty { account["userCode"] = phoneUserCode }
         boot["smartLife"] = account
         boot["services"] = hub.servicesInfo
+        boot["dashboard"] = dashboard?.config
         switch ProcessInfo.processInfo.environment["HOUSE_OPEN_EDITOR"] {
         case "smartlife": boot["section"] = "service:smartlife"
         case "homeassistant", "hue", "homekit", "connections":
@@ -242,6 +254,68 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return boot
     }
 
+    /// Reads dashboard.json again: what the panel may show and call, and how big it is.
+    private func loadDashboard() {
+        dashboard = Dashboard(directory: plans.directory)
+        hub.homeAssistant.dashboardEntities = dashboard?.entities ?? []
+        hub.homeAssistant.onDashboardChange = { [weak self] in self?.panel.host.call("haChanged") }
+        hub.homeAssistant.onDashboardState = { [weak self] entity, state in
+            guard let self, entity == self.dashboard?.menuBarEntity else { return }
+            self.noteMenuBar("live", state)
+            guard let value = Double(state) else { return } // "unavailable" & co.: keep the last good value
+            self.menuBarTemperature = value
+            self.refreshStatusIcon()
+        }
+        menuBarTimer?.invalidate()
+        menuBarTimer = nil
+        if dashboard?.menuBarEntity != nil {
+            readMenuBarTemperature()
+            // The live updates carry every change; this only catches one they might have missed.
+            menuBarTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { self?.readMenuBarTemperature() }
+            }
+        }
+        panel.resize(card: dashboard?.panelSize ?? NSSize(width: 440, height: 800))
+        sync.broadcast() // paired iPhones and iPads show the same dashboard
+    }
+
+    /// Reads the menu bar's temperature now; on a failure (HA not reachable yet at launch) it
+    /// tries again a few times, five seconds apart.
+    private func readMenuBarTemperature(attempt: Int = 1) {
+        guard let entity = dashboard?.menuBarEntity else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let state = try await self.hub.homeAssistant.state(of: entity)
+                self.noteMenuBar("read \(attempt)", state ?? "nil")
+                if let value = state.flatMap(Double.init) {
+                    self.menuBarTemperature = value
+                    self.refreshStatusIcon()
+                }
+            } catch {
+                self.noteMenuBar("read \(attempt) failed", error.localizedDescription)
+                guard attempt < 6 else { return }
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                self.readMenuBarTemperature(attempt: attempt + 1)
+            }
+        }
+    }
+
+    /// A line in menubar.log (data folder): where the menu bar's temperature came from.
+    private func noteMenuBar(_ source: String, _ value: String) {
+        let url = plans.directory.appendingPathComponent("menubar.log")
+        // kept small: start over once it passes 64 KB
+        if let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int, size > 65_536 {
+            try? FileManager.default.removeItem(at: url)
+        }
+        let line = "\(ISO8601DateFormatter().string(from: Date())) \(source): \(value) -> shown \(menuBarTemperature.map { "\($0)" } ?? "none")\n"
+        if let handle = try? FileHandle(forWritingTo: url) {
+            handle.seekToEndOfFile(); handle.write(Data(line.utf8)); try? handle.close()
+        } else {
+            try? Data(line.utf8).write(to: url)
+        }
+    }
+
     private func reloadLinks() {
         hub.setLinks(from: plans.activePlan == "custom" ? plans.customPlan() : nil)
     }
@@ -254,6 +328,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func reloadAll() {
+        loadDashboard()
         reloadLinks()
         widgets.isReady = false
         panel.host.load()
@@ -363,6 +438,66 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             hub.command(message) { [weak host] in host?.reply(to: message, $0) }
         case "widgets":
             if host === panel.host { widgets.publish(message) }
+        // The panel's dashboard: only the entities dashboard.json names.
+        case "ha.states":
+            let ids = Set(message["ids"] as? [String] ?? []).intersection(dashboard?.entities ?? [])
+            Task { @MainActor in
+                do {
+                    host.reply(to: message, ["states": try await hub.homeAssistant.states(ids)])
+                } catch {
+                    host.reply(to: message, ["error": error.localizedDescription])
+                }
+            }
+        case "ha.history":
+            let ids = Set(message["ids"] as? [String] ?? []).intersection(dashboard?.entities ?? [])
+            let hours = min(max(message["hours"] as? Double ?? 3, 0.25), 48)
+            Task { @MainActor in
+                do {
+                    host.reply(to: message, ["history": try await hub.homeAssistant.history(ids, hours: hours)])
+                } catch {
+                    host.reply(to: message, ["error": error.localizedDescription])
+                }
+            }
+        case "dashboard.open":
+            // Only the links dashboard.json lists, in the default browser.
+            if let text = message["url"] as? String, dashboard?.urls.contains(text) == true, let url = URL(string: text) {
+                panel.hide()
+                NSWorkspace.shared.open(url)
+            }
+        case "homeAssistant.open":
+            // The header's home badge: the Home Assistant app when it is installed, else the
+            // connected server in the default browser.
+            if let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "io.robbie.HomeAssistant") {
+                panel.hide()
+                NSWorkspace.shared.openApplication(at: app, configuration: NSWorkspace.OpenConfiguration())
+            } else if let text = hub.homeAssistant.info["url"] as? String, let url = URL(string: text) {
+                panel.hide()
+                NSWorkspace.shared.open(url)
+            }
+        case "dashboard.copy":
+            if let text = message["text"] as? String, !text.isEmpty, text.count < 2000 {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(text, forType: .string)
+            }
+        case "ha.call":
+            let domain = message["domain"] as? String ?? ""
+            let service = message["service"] as? String ?? ""
+            let data = message["data"] as? [String: Any] ?? [:]
+            guard let dashboard, dashboard.allows(domain: domain, service: service, data: data) else {
+                host.reply(to: message, ["error": "\(domain).\(service) is not in dashboard.json"])
+                return
+            }
+            let what = "\(domain).\(service) \(data["entity_id"] as? String ?? "") \(data.filter { $0.key != "entity_id" })"
+            Task { @MainActor in
+                do {
+                    try await hub.homeAssistant.callService(domain: domain, service: service, data: data)
+                    hub.log.write("panel [Home Assistant] \(what) → ok")
+                    host.reply(to: message, ["ok": true])
+                } catch {
+                    hub.log.write("panel [Home Assistant] \(what) → \(error.localizedDescription)")
+                    host.reply(to: message, ["error": error.localizedDescription])
+                }
+            }
         case "close":
             panel.hide()
         case "selectPlan":
@@ -373,6 +508,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         case "loadPlan": loadPlan()
         case "openAgent": openAgent()
+        case "panelHeight":
+            if let height = message["height"] as? Double, host === panel.host { panel.fit(cardHeight: CGFloat(height)) }
+        case "pairPhone": pairPhone()
         case "revealPlan": revealPlan()
         case "openEditor": openEditor()
         case "quit": NSApp.terminate(nil)
@@ -598,7 +736,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                       plan: try? Data(contentsOf: self.plans.customPlanURL),
                       userCode: self.smartLife.userCode,
                       smartLifeConnected: self.smartLife.isSmartLifeConnected,
-                      connections: self.hub.shareableConnections)
+                      connections: self.hub.shareableConnections,
+                      dashboard: self.dashboard?.data)
         }
         sync.onCatalog = { [weak self] devices, phone in
             guard let self, let catalog = self.hub.homeKit as? RemoteCatalogService else { return }
