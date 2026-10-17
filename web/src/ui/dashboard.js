@@ -384,6 +384,8 @@ export function createDashboard(spec, { chips, onTab = () => {}, onStates = () =
           on = !(item.off || OFF).includes(s);
           text = item.labels?.[s] ?? cap(s);
         }
+        const level = item.battery ? num(state(item.battery)) : null; // `battery`: a % sensor shown beside the state
+        if (level != null) text += ` · ${Math.round(level)}%`;
         const left = item.remaining && on ? state(item.remaining) : null;
         if (left && /^\d+:\d\d/.test(left) && !/^0:00/.test(left)) text += ` · ${left.split(':').slice(0, 2).join(':')} left`;
         el.classList.toggle('on', on);
@@ -503,6 +505,39 @@ export function createDashboard(spec, { chips, onTab = () => {}, onStates = () =
         a.icon ? icon(a.icon, 13, 2.2) : null, h('span', a.label)));
     }
     return { el: row };
+  }
+
+  // A robot vacuum in one card: its state and battery, start / pause, back to the dock and locate;
+  // and, when the integration can clean one room (`vacuum.clean_area`), a chip per room under it.
+  // `rooms: [{name, area}]`, `area` being the Home Assistant area id; `battery`: a % sensor.
+  function vacuumControl(w) {
+    const id = w.entity;
+    const CLEAN_AREA = 16384;
+    const labels = { docked: 'Na base', cleaning: 'Limpando', returning: 'Voltando', paused: 'Pausado', idle: 'Parado', error: 'Erro', ...(w.labels || {}) };
+    const run = (service, data = {}) => act(c, 'vacuum', service, { entity_id: id, ...data });
+    const main = button('play', 'Iniciar', () => run(state(id) === 'cleaning' ? 'pause' : 'start'));
+    const c = card('vacuum', w.color || '#5fe08a', main,
+      button('home', 'Voltar à base', () => run('return_to_base')),
+      button('bell', 'Localizar', () => run('locate')));
+    c.icon('sparkles');
+    c.name.textContent = w.name || 'Aspirador';
+    const rooms = h('div.dash-actions', (w.rooms || []).map((r) =>
+      h('button.dash-action', { title: `Aspirar ${r.name}`, onclick: () => run('clean_area', { cleaning_area_id: [].concat(r.area) }) }, h('span', r.name))));
+    const el = h('div.dash-vacuum', { style: { gridColumn: '1 / -1', display: 'grid', gap: '6px' } }, c.el, rooms);
+    return {
+      el,
+      update() {
+        const s = state(id);
+        const cleaning = s === 'cleaning';
+        main.replaceChildren(icon(cleaning ? 'pause' : 'play', 13, 2.4));
+        main.title = cleaning ? 'Pausar' : 'Iniciar';
+        main.setAttribute('aria-label', main.title);
+        c.el.classList.toggle('on', cleaning);
+        const level = w.battery ? num(state(w.battery)) : null;
+        c.setSub([labels[s] ?? cap(s), level != null ? `${Math.round(level)}%` : null].filter(Boolean).join(' · '));
+        rooms.hidden = !(((Number(attr(id, 'supported_features')) || 0) & CLEAN_AREA) && (w.rooms || []).length);
+      },
+    };
   }
 
   // The washing machine (LG): its phase and time left, start / pause / resume, wake and power off
@@ -839,8 +874,8 @@ export function createDashboard(spec, { chips, onTab = () => {}, onStates = () =
     };
   }
 
-  const WIDGETS = { fan, ac, media, tv, computer, toggle, actions, washer, status, lights, glance, chart, net, links, power: powerUse, batteries };
-  const FULL_WIDTH = ['media', 'tv', 'computer', 'toggle', 'actions', 'washer', 'glance', 'chart', 'net', 'links', 'power', 'batteries'];
+  const WIDGETS = { fan, ac, media, tv, computer, toggle, actions, washer, status, lights, glance, chart, net, links, power: powerUse, batteries, vacuum: vacuumControl };
+  const FULL_WIDTH = ['media', 'tv', 'computer', 'toggle', 'actions', 'washer', 'glance', 'chart', 'net', 'links', 'power', 'batteries', 'vacuum'];
 
   /* ---------- layout ---------- */
 

@@ -35,7 +35,7 @@ Widget types:
 | `toggle` | `name`, `icon`, `entity` (switch), `watts` (sensor): on/off with its draw |
 | `actions` | `script`, shared `variables`, `items[{label, icon?, variables, script?}]`: a row of one-tap script chips |
 | `washer` | `script` (+ `fields.action`, verbs iniciar/pausar/acordar/desligar), `status`, `remaining`, `remoteStart`, `course` (select, picked from a pop-up menu), `delay` (number, the delayed end in h), `cycles`, `tubClean`, `energyToday`, `energyMonth`, `labels` |
-| `status` | `items[{name, icon, entity, off[], labels{}, above, unit, remaining, color}]` |
+| `status` | `items[{name, icon, entity, off[], labels{}, above, unit, remaining, battery, color}]` (`battery`: a % sensor shown beside the state) |
 | `lights` | `ids` (plan light ids), `columns` |
 | `glance` | `items[{name, entity, copy, detail (attribute), strip (regex), status, unit, decimals, note}]` |
 | `chart` | `series[{name, entity}]`, `hours`, `unit`, `max` |

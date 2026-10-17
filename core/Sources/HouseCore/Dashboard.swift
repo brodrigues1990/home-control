@@ -16,7 +16,7 @@ public struct Dashboard {
     /// `sala.luz`) is not a Home Assistant entity.
     private static let domains: Set<String> = [
         "script", "switch", "light", "fan", "climate", "media_player", "sensor", "binary_sensor", "device_tracker",
-        "input_boolean", "input_select", "input_number", "select", "number", "button", "sun",
+        "input_boolean", "input_select", "input_number", "select", "number", "button", "sun", "vacuum",
     ]
 
     public static func url(in directory: URL) -> URL { directory.appendingPathComponent("dashboard.json") }
