@@ -2,7 +2,7 @@
    lights, in place of the scenes, room filter and device grid. */
 
 .card.has-dash { --stage-h: 430px; }
-.card.has-dash .scenes, .card.has-dash .rooms, .card.has-dash .list-head { display: none; }
+.card.has-dash .scenes, .card.has-dash .list-head { display: none; }
 .card.has-dash .devices { padding-top: 10px; }
 
 .dash { display: flex; flex-direction: column; gap: 14px; }

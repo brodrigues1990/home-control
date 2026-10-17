@@ -98,6 +98,7 @@ export function createPanel(root, config, store, { onFocus, onMenu, onModel = ()
   function selectRoom(id) {
     if (ui.room === id) id = 'all';
     ui.room = id;
+    dash?.setRoom(id);
     layoutTiles();
     update();
     roomButtons.get(id).b.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });

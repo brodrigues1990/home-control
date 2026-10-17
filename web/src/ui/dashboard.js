@@ -643,6 +643,14 @@ export function createDashboard(spec, { chips, onTab = () => {}, onStates = () =
     };
   }
 
+  // The panel's room filter. An entry (section, widget, chart series, power item) with `room`
+  // shows for that room; with `only: "all"` only for the whole home; with `only: "room"` only
+  // when a room is picked. Entries naming neither stay in view for the whole home.
+  let roomSel = 'all';
+  const visible = (x) => (roomSel === 'all' ? x.only !== 'room' : x.room === roomSel && x.only !== 'all');
+  const filtered = (x) => x.room != null || x.only != null; // has something to filter by
+  const roomAware = []; // { el, spec } hidden by the room filter, and widgets that redraw on it
+
   // Percentages over the last hours on one axis (CPU, memory, GPU...), labelled at the end.
   function chart(w) {
     const series = (w.series || []).map((s, i) => ({ ...s, color: s.color || SERIES_COLORS[i % SERIES_COLORS.length] }));
@@ -653,14 +661,18 @@ export function createDashboard(spec, { chips, onTab = () => {}, onStates = () =
       height: w.height || 140, yMax: w.max ?? (unit === '%' ? 100 : null),
       format: (v) => `${Math.round(v)}${unit}`, label: w.title || series.map((s) => s.name).join(', '),
     });
-    const legend = h('div.chart-legend', series.map((s) => h('span.chart-key', h('i', { vars: { '--c': s.color } }), s.name)));
+    const legend = h('div.chart-legend');
     const el = h('div.dash-chart', h('div.chart-head', h('span.chart-title', w.title || `Last ${hours} h`), legend), plot.el);
+    const shown = () => series.filter(visible);
     const draw = () => {
       store.tail();
       const now = Date.now();
-      plot.render(series.map((s) => ({ name: s.name, color: s.color, points: store.data[s.entity] || [] })), now - hours * 3600000, now);
+      const mine = shown();
+      legend.replaceChildren(...mine.map((s) => h('span.chart-key', h('i', { vars: { '--c': s.color } }), s.name)));
+      el.hidden = !mine.length; // nothing to plot for this room
+      plot.render(mine.map((s) => ({ name: s.name, color: s.color, points: store.data[s.entity] || [] })), now - hours * 3600000, now);
     };
-    return { el, history: store, draw, update: () => { if (el.isConnected && el.offsetParent) draw(); } };
+    return { el, history: store, draw, setRoom: draw, update: () => { if (el.isConnected && el.offsetParent) draw(); } };
   }
 
   // Network throughput: up, down and their sum now, the data moved in the window, and the
@@ -760,7 +772,7 @@ export function createDashboard(spec, { chips, onTab = () => {}, onStates = () =
       list);
     // Sum of every device at each moment (each holds its last reading until the next one).
     const totalSeries = () => {
-      const series = items.map((i) => store.data[i.entity] || []).filter((p) => p.length);
+      const series = items.filter(visible).map((i) => store.data[i.entity] || []).filter((p) => p.length);
       const times = [...new Set(series.flatMap((p) => p.map((x) => x[0])))].sort((a, b) => a - b);
       return times.map((t) => [t, series.reduce((sum, p) => sum + (valueAt(p, t) ?? 0), 0)]);
     };
@@ -771,10 +783,13 @@ export function createDashboard(spec, { chips, onTab = () => {}, onStates = () =
     };
     return {
       el, history: store, draw,
+      setRoom() { this.update(); },
       update() {
-        for (const r of rows) r.watts = num(state(r.item.entity));
-        const sum = rows.reduce((s, r) => s + (r.watts ?? 0), 0);
-        const top = Math.max(1, ...rows.map((r) => r.watts ?? 0));
+        for (const r of rows) { r.watts = num(state(r.item.entity)); r.el.hidden = !visible(r.item); }
+        const mine = rows.filter((r) => !r.el.hidden);
+        el.hidden = !mine.length; // no metered device in this room
+        const sum = mine.reduce((s, r) => s + (r.watts ?? 0), 0);
+        const top = Math.max(1, ...mine.map((r) => r.watts ?? 0));
         total.textContent = Math.round(sum);
         const sorted = [...rows].sort((a, b) => (b.watts ?? -1) - (a.watts ?? -1));
         sorted.forEach((r, i) => {
@@ -839,13 +854,17 @@ export function createDashboard(spec, { chips, onTab = () => {}, onStates = () =
       const widget = make(w);
       if (w.wide ?? FULL_WIDTH.includes(w.type)) widget.el.classList.add('wide'); // `"wide": false` pairs two up
       body.append(widget.el);
+      if (filtered(w)) roomAware.push({ el: widget.el, spec: w });
+      if (widget.setRoom) roomAware.push({ widget });
       if (widget.update) updaters.push(widget);
       if (widget.history) charts.push({ pane, widget });
     }
     if (section.temperature) {
       updaters.push({ update() { const t = num(state(section.temperature)); note.textContent = t != null ? `${t.toFixed(1)}°` : ''; } });
     }
-    return h('section.dash-sec', h('div.dash-title', h('span', section.title || ''), note), body);
+    const sec = h('section.dash-sec', h('div.dash-title', h('span', section.title || ''), note), body);
+    if (filtered(section)) roomAware.push({ el: sec, spec: section });
+    return sec;
   }
 
   const tabs = spec.tabs?.length ? spec.tabs : [{ title: spec.title || 'Home', sections: spec.sections || [] }];
@@ -921,5 +940,13 @@ export function createDashboard(spec, { chips, onTab = () => {}, onStates = () =
     },
     refresh,
     select,
+    /** The panel's room filter changed: 'all' or a plan room id. */
+    setRoom(id) {
+      roomSel = id || 'all';
+      for (const r of roomAware) { if (r.spec) r.el.hidden = !visible(r.spec); }
+      render();
+      showCharts();
+      this.onLayout?.();
+    },
   };
 }
