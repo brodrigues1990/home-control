@@ -1,12 +1,15 @@
 import AppKit
 import UniformTypeIdentifiers
 import HouseCore
+import HouseSmartLife
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let plans = PlanStore()
     /// The Smart Life / Tuya side: device links, commands and state.
-    private lazy var hub = DeviceHub(directory: plans.directory)
+    private lazy var hub = DeviceHub(directory: plans.directory, cloud: SmartLifePlatform.init)
+    /// Smart Life is always part of the Mac app.
+    private var smartLife: SmartLifePlatform { hub.smartLife! }
     /// Hands the floor plan to paired iPhones on the local network.
     private lazy var sync = SyncServer(store: FileSecretStore(url: plans.directory.appendingPathComponent("sync.json")))
     private var island: IslandController?
@@ -31,6 +34,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return agent
     }()
     private var lastSummary: [String: Any] = [:]
+    /// The Smart Life User Code a paired iPhone signed in with, to save typing it here.
+    private var phoneUserCode = ""
+    /// Desktop widgets and Control Center controls: what they show, what they asked for.
+    private let widgets = WidgetBridge()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         buildMainMenu()
@@ -51,10 +58,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel = PanelController(host: host)
         panel.onVisibilityChange = { [weak self] visible in self?.setPolling(visible) }
         hub.onStale = { [weak self] in self?.poll() }
+        widgets.onActions = { [weak self] run, adopt in
+            guard let self else { return }
+            if !run.isEmpty { self.panel.host.call("widget", run) }
+            if let adopt { self.panel.host.call("adopt", adopt) }
+        }
         reloadLinks()
         host.load()
         startSync()
         if islandEnabled { showIsland() }
+        LoginItem.followMove()
 
         // HOUSE_SNAPSHOT_DIR=<folder> writes panel.png and island.png there a few seconds
         // after launch: a look at the UI without a screen (see HOUSE_RENDER_HIDDEN).
@@ -80,6 +93,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if ProcessInfo.processInfo.environment["HOUSE_OPEN_ON_LAUNCH"] != nil {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in self?.togglePanel() }
+        }
+    }
+
+    /// `housecontrol://open[?device=…]`: a click on a widget opens the panel (on that lamp, AC or room).
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard let url = urls.first, url.scheme == SyncPairing.scheme, url.host == "open" else { return }
+        if !panel.isVisible { togglePanel() }
+        if let device = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "device" })?.value {
+            panel.host.call("openDevice", device)
         }
     }
 
@@ -161,6 +183,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let islandItem = menu.addItem(withTitle: "Show Island", action: #selector(toggleIsland), keyEquivalent: "")
             islandItem.target = self
             islandItem.state = island?.isShown == true ? .on : .off
+            let login = LoginItem.state
+            let loginItem = menu.addItem(withTitle: login == .needsApproval ? "Open at Login — Allow in Settings…" : "Open at Login",
+                                         action: #selector(toggleOpenAtLogin), keyEquivalent: "")
+            loginItem.target = self
+            loginItem.state = login == .on ? .on : login == .needsApproval ? .mixed : .off
             menu.addItem(withTitle: "Pair iPhone…", action: #selector(pairPhone), keyEquivalent: "").target = self
             let aiItem = menu.addItem(withTitle: agent.isLive ? "AI Access — Live" : "AI Access…", action: #selector(openAgent), keyEquivalent: "")
             aiItem.target = self
@@ -173,6 +200,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 item.image = NSImage(systemSymbolName: "iphone", accessibilityDescription: nil)
             }
             menu.addItem(.separator())
+            menu.addItem(aboutMenuItem())
             menu.addItem(withTitle: "Reload", action: #selector(reloadAll), keyEquivalent: "").target = self
             menu.addItem(withTitle: "Quit House Control", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
             statusItem.menu = menu
@@ -186,14 +214,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func togglePanel() {
         guard let button = statusItem.button else { return }
         panel.toggle(below: button)
+        // It can be switched off in System Settings too: the panel's menu shows what is true now.
+        if panel.isVisible { panel.host.call("openAtLogin", LoginItem.state.rawValue) }
     }
 
     // MARK: - Plans
 
     private func bootPayload() -> [String: Any] {
         var boot = plans.bootPayload()
-        boot["tuya"] = hub.tuyaInfo
-        boot["smartLife"] = hub.smartLifeInfo
+        boot["tuya"] = smartLife.tuyaInfo
+        var account = smartLife.smartLifeInfo
+        // Not signed in here yet: offer the User Code a paired iPhone signed in with.
+        if !smartLife.isSmartLifeConnected, !phoneUserCode.isEmpty { account["userCode"] = phoneUserCode }
+        boot["smartLife"] = account
         boot["services"] = hub.servicesInfo
         switch ProcessInfo.processInfo.environment["HOUSE_OPEN_EDITOR"] {
         case "smartlife": boot["section"] = "service:smartlife"
@@ -203,6 +236,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         default: break
         }
         boot["agentLive"] = agent.isLive
+        boot["openAtLogin"] = LoginItem.state.rawValue
         // HOUSE_OPEN_DEVICE=<id> starts the panel on that light's or AC's detail sheet.
         if let device = ProcessInfo.processInfo.environment["HOUSE_OPEN_DEVICE"] { boot["openDevice"] = device }
         return boot
@@ -221,6 +255,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func reloadAll() {
         reloadLinks()
+        widgets.isReady = false
         panel.host.load()
         if island?.isShown == true { island?.host.load() }
         sync.broadcast()
@@ -245,6 +280,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func revealPlan() {
         let url = plans.hasCustomPlan ? plans.customPlanURL : WebHost.assetRoot.appendingPathComponent("plans/\(plans.activePlan).json")
         NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    /// "About House Control": the version, the website and where to find the developer.
+    private func aboutMenuItem() -> NSMenuItem {
+        let about = NSMenu()
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+        about.addItem(withTitle: "House Control\(version.map { " \($0)" } ?? "")", action: nil, keyEquivalent: "")
+        about.addItem(.separator())
+        let links: [(String, String, URL)] = [
+            ("Website", "globe", About.website),
+            ("Privacy Policy", "hand.raised", About.privacy),
+            ("Support", "questionmark.circle", About.support),
+            ("", "", About.website),
+            ("\(About.developer) on X", "at", About.x),
+            ("\(About.developer) on GitHub", "chevron.left.forwardslash.chevron.right", About.github),
+            ("Source Code", "shippingbox", About.source),
+        ]
+        for (title, symbol, url) in links {
+            guard !title.isEmpty else { about.addItem(.separator()); continue }
+            let item = about.addItem(withTitle: title, action: #selector(openLink(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = url
+            item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        }
+        let item = NSMenuItem(title: "About House Control", action: nil, keyEquivalent: "")
+        item.submenu = about
+        return item
+    }
+
+    @objc private func openLink(_ sender: NSMenuItem) {
+        if let url = sender.representedObject as? URL { NSWorkspace.shared.open(url) }
     }
 
     @objc private func revealLog() {
@@ -283,6 +349,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "ready", "summary":
             // A view that has just loaded takes over what the panel shows.
             if message["type"] as? String == "ready", host !== panel.host { panel.host.call("share") }
+            if message["type"] as? String == "ready", host === panel.host { widgets.isReady = true }
             if let summary = (message["summary"] as? [String: Any]) ?? (message["lightsOn"] != nil ? message : nil) {
                 updateStatus(summary)
             }
@@ -294,6 +361,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             for other in [panel.host, island?.host] where other !== host { other?.call("adopt", state) }
         case "command":
             hub.command(message) { [weak host] in host?.reply(to: message, $0) }
+        case "widgets":
+            if host === panel.host { widgets.publish(message) }
         case "close":
             panel.hide()
         case "selectPlan":
@@ -307,6 +376,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "revealPlan": revealPlan()
         case "openEditor": openEditor()
         case "quit": NSApp.terminate(nil)
+        case "setOpenAtLogin": setOpenAtLogin(message["on"] as? Bool ?? false)
 
         // Editor
         case "savePlan":
@@ -345,17 +415,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         case "tuya.save":
             do {
-                try hub.saveTuya(accessId: message["accessId"] as? String ?? "",
+                try smartLife.saveTuya(accessId: message["accessId"] as? String ?? "",
                                  accessSecret: message["accessSecret"] as? String ?? "",
                                  region: message["region"] as? String ?? "eu")
-                host.reply(to: message, hub.tuyaInfo)
+                host.reply(to: message, smartLife.tuyaInfo)
             } catch {
                 host.reply(to: message, ["error": error.localizedDescription])
             }
         case "tuya.devices":
             Task { @MainActor in
                 do {
-                    host.reply(to: message, ["devices": try await hub.listDevices()])
+                    host.reply(to: message, ["devices": try await smartLife.listDevices()])
                 } catch {
                     host.reply(to: message, ["error": error.localizedDescription])
                 }
@@ -364,7 +434,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let userCode = message["userCode"] as? String ?? ""
             Task { @MainActor in
                 do {
-                    let login = try await hub.beginLogin(userCode: userCode)
+                    let login = try await smartLife.beginLogin(userCode: userCode)
                     let png = QRCode.png(for: login.qrContent).map { "data:image/png;base64,\($0.base64EncodedString())" }
                     host.reply(to: message, ["token": login.token, "qr": png ?? ""])
                 } catch {
@@ -375,13 +445,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let token = message["token"] as? String ?? ""
             let userCode = message["userCode"] as? String ?? ""
             Task { @MainActor in
-                let done = await hub.finishLogin(token: token, userCode: userCode)
-                host.reply(to: message, ["connected": done, "info": hub.smartLifeInfo])
+                let done = await smartLife.finishLogin(token: token, userCode: userCode)
+                host.reply(to: message, ["connected": done, "info": smartLife.smartLifeInfo])
                 if done { sync.broadcast() }
             }
         case "smartlife.signOut":
-            hub.signOut()
-            host.reply(to: message, hub.smartLifeInfo)
+            smartLife.signOut()
+            host.reply(to: message, smartLife.smartLifeInfo)
             sync.broadcast()
 
         // Home Assistant, Philips Hue, Apple Home
@@ -401,7 +471,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "homeassistant.connect":
             Task { @MainActor in
                 do {
-                    try await hub.homeAssistant.connect(url: message["url"] as? String ?? "", token: message["token"] as? String ?? "")
+                    try await hub.connectHomeAssistant(url: message["url"] as? String ?? "", token: message["token"] as? String ?? "")
                     connectionsChanged()
                     host.reply(to: message, hub.servicesInfo)
                 } catch {
@@ -411,8 +481,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "hue.pair":
             Task { @MainActor in
                 do {
-                    try await hub.hue.pair(host: message["host"] as? String ?? "", bridgeId: message["bridgeId"] as? String,
-                                           name: message["name"] as? String)
+                    try await hub.pairHue(host: message["host"] as? String ?? "", bridgeId: message["bridgeId"] as? String,
+                                          name: message["name"] as? String)
                     connectionsChanged()
                     host.reply(to: message, hub.servicesInfo)
                 } catch is HueService.ButtonNotPressed {
@@ -422,7 +492,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         case "service.disconnect":
-            hub.services.first { $0.id == message["service"] as? String }?.disconnect()
+            hub.disconnect(service: message["service"] as? String ?? "")
             connectionsChanged()
             host.reply(to: message, hub.servicesInfo)
         default:
@@ -489,6 +559,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if show { showIsland() } else { island?.hide() }
     }
 
+    // MARK: - Open at Login
+
+    /// Waiting for approval counts as off: choosing it again takes the user to System Settings.
+    @objc private func toggleOpenAtLogin() { setOpenAtLogin(LoginItem.state != .on) }
+
+    private func setOpenAtLogin(_ on: Bool) {
+        if on, LoginItem.isTemporaryCopy {
+            alert("Move House Control to Applications first",
+                  "It is running from the disk image or from a temporary copy of the download, which is gone after a restart. "
+                  + "Drag House Control into the Applications folder, open it from there, then turn on Open at Login.")
+            return
+        }
+        do {
+            try LoginItem.set(on)
+        } catch {
+            alert(on ? "Could not add House Control to Login Items" : "Could not remove House Control from Login Items",
+                  "\(error.localizedDescription)\n\nYou can change it in System Settings → General → Login Items.")
+        }
+        panel.host.call("openAtLogin", LoginItem.state.rawValue)
+        // The very first registration can take a moment to show in the status.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            self?.panel.host.call("openAtLogin", LoginItem.state.rawValue)
+        }
+    }
+
     // MARK: - iPhone sync
 
     /// The name paired iPhones see (HOUSE_COMPUTER_NAME replaces it for screenshots).
@@ -501,8 +596,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             SyncState(macName: self.computerName,
                       revision: self.plans.customPlanRevision ?? "",
                       plan: try? Data(contentsOf: self.plans.customPlanURL),
-                      userCode: self.hub.smartLifeUserCode,
-                      smartLifeConnected: self.hub.isSmartLifeConnected,
+                      userCode: self.smartLife.userCode,
+                      smartLifeConnected: self.smartLife.isSmartLifeConnected,
                       connections: self.hub.shareableConnections)
         }
         sync.onCatalog = { [weak self] devices, phone in
@@ -510,9 +605,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             catalog.update(devices: devices, from: phone)
             self.editor?.host.call("servicesChanged", self.hub.servicesInfo)
         }
+        // A home set up or edited on the iPhone becomes this Mac's home too.
+        sync.onPlan = { [weak self] data, phone in self?.receivedPlan(data, from: phone) }
+        sync.onConnections = { [weak self] shared, userCode, _ in
+            guard let self else { return }
+            if !userCode.isEmpty { self.phoneUserCode = userCode }
+            if self.hub.adoptConnections(shared) {
+                self.connectionsChanged()
+                self.editor?.host.call("servicesChanged", self.hub.servicesInfo)
+            }
+        }
         sync.onPeersChanged = { [weak self] in self?.refreshPairingWindow() }
         sync.onShowQR = { [weak self] content, device in self?.showLoginCode(content, for: device) }
         sync.start() // only listens once a phone has been paired
+    }
+
+    /// Stores a plan an iPhone saved. The first one becomes the active home; later ones
+    /// replace it (a Mac that switched to a demo plan stays there, like the phone does).
+    private func receivedPlan(_ data: Data, from phone: String) {
+        let first = !plans.hasCustomPlan
+        do {
+            try plans.saveCustom(data: data, select: first || plans.activePlan == "custom")
+        } catch {
+            NSLog("House Control: could not store the plan from %@: %@", phone, error.localizedDescription)
+            return
+        }
+        reloadLinks()
+        widgets.isReady = false
+        panel.host.load()
+        if island?.isShown == true { island?.host.load() }
+        sync.broadcast()
+        // An open editor takes the new plan unless it holds unsaved changes of its own.
+        if let editor, let plan = plans.customPlan() { editor.host.call("planArrived", plan, phone) }
     }
 
     /// Shows the QR code an iPhone scans once to find this Mac and receive its floor plan.
@@ -533,7 +657,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pairingWindow?.show(code: pairing.link,
                             headline: "Scan with House Control on your iPhone",
                             detail: "On the iPhone open Settings → Pair with Mac. Both devices must be on the same Wi-Fi. "
-                                + "Your floor plan is sent straight from this Mac to the phone, encrypted with the key in this code.")
+                                + "Your floor plan, device links and connections stay the same on both, whichever one you edit; "
+                            + "they travel straight between them, encrypted with the key in this code.")
         refreshPairingWindow()
     }
 

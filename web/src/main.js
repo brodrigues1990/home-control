@@ -6,6 +6,7 @@ import { createAgent } from './agent/tools.js';
 import { h, openMenu } from './ui/dom.js';
 import { icon } from './ui/icons.js';
 import { isNative, isPhone, post, incoming, haptic } from './bridge.js';
+import { publishWidgets, runWidgetAction } from './widgets.js';
 
 const DEMO_PLANS = [
   { id: 'home', name: 'Demo · Apartment' },
@@ -111,6 +112,21 @@ async function boot() {
   incoming.applyRemote = (update) => store.applyRemote(update);
   incoming.adopt = (state) => store.adopt(state);
   incoming.share = () => store.share();
+  // Widgets and controls: what they changed while the app was away is run here, where it
+  // reaches the devices; a widget's tap on a lamp or a scene opens that in the panel.
+  incoming.widget = (actions) => {
+    store.source = 'Widget';
+    try {
+      for (const action of [].concat(actions)) runWidgetAction(store, config, action);
+    } finally {
+      store.source = null;
+    }
+  };
+  incoming.openDevice = (id) => {
+    if (store.acCfg.has(id)) panel.openSheet({ kind: 'ac', id });
+    else if (store.lightCfg.has(id)) panel.openSheet({ kind: 'light', id });
+    else if (config.rooms.some((r) => r.id === id)) { panel.closeSheet(); panel.selectRoom(id); }
+  };
   // AI Access: an AI assistant's requests are run here, where the state of every device lives.
   const agent = createAgent({
     store, config, raw,
@@ -127,6 +143,9 @@ async function boot() {
   };
   incoming.agentLive = (live) => panel.setAgentLive(Boolean(live));
   panel.setAgentLive(Boolean(window.__HOUSE_BOOT__?.agentLive));
+  // 'on', 'off' or 'needsApproval' (switched on, waiting to be allowed in System Settings).
+  let openAtLogin = window.__HOUSE_BOOT__?.openAtLogin || 'off';
+  incoming.openAtLogin = (state) => { openAtLogin = state; };
 
   store.onDeviceError = (id, message) => {
     const name = store.lightCfg.get(id)?.name || store.acCfg.get(id)?.name || id;
@@ -164,6 +183,11 @@ async function boot() {
         { label: 'Load floor plan…', action: () => post('loadPlan') },
         { label: 'Reveal plan file', action: () => post('revealPlan') },
         '-',
+        {
+          label: openAtLogin === 'needsApproval' ? 'Open at login — allow in Settings…' : 'Open at login',
+          icon: openAtLogin === 'on' ? icon('check', 16, 2.4) : null,
+          action: () => post('setOpenAtLogin', { on: openAtLogin !== 'on' }),
+        },
         { label: 'Quit House Control', action: () => post('quit') });
     }
     openMenu(panel.anchorMenu, anchor, items);
@@ -175,6 +199,7 @@ async function boot() {
 
   if (!isNative) show();
   post('ready', { summary: store.summary() });
+  if (isNative) publishWidgets(config, store);
   window.__house = { store, world, panel, config }; // handy in the dev console
 }
 

@@ -1,4 +1,6 @@
 # The Xcode project is generated from this file: `xcodegen generate` (scripts/build-ios.sh does it).
+# This is the App Store edition: Home Assistant, Philips Hue and Apple Home. The edition with
+# Smart Life on top (TestFlight, own use) is project-smartlife.yml, which includes this file.
 name: HouseControl
 options:
   bundleIdPrefix: io.github.0xprobabillity
@@ -25,14 +27,20 @@ targets:
         buildPhase: resources
     dependencies:
       - package: HouseCore
+      - target: HouseWidgets
+        embed: true
     entitlements:
       path: Config/HouseControl.entitlements
       properties:
         com.apple.developer.homekit: true
+        # Shared with the widgets: the home they draw, and the connections they use.
+        com.apple.security.application-groups: [$(HOUSE_APP_GROUP)]
+        keychain-access-groups: [$(AppIdentifierPrefix)io.github.0xprobabillity.HouseControl]
     info:
       path: Config/Info.plist
       properties:
         CFBundleDisplayName: House Control
+        HouseAppGroup: $(HOUSE_APP_GROUP)
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSApplicationCategoryType: public.app-category.lifestyle
@@ -42,8 +50,8 @@ targets:
         UIRequiresFullScreen: true
         UIUserInterfaceStyle: Dark
         ITSAppUsesNonExemptEncryption: false
-        NSLocalNetworkUsageDescription: House Control looks for your Mac on this Wi-Fi network to receive the floor plan you made there, and talks to your Home Assistant and Hue Bridge.
-        NSBonjourServices: [_housecontrol._tcp]
+        NSLocalNetworkUsageDescription: House Control finds your Home Assistant and Hue Bridge on this Wi-Fi network, and your Mac, to keep your floor plan the same on both.
+        NSBonjourServices: [_housecontrol._tcp, _hue._tcp, _home-assistant._tcp]
         NSHomeKitUsageDescription: House Control shows the lamps, air conditioners and thermometers of your homes in its 3D view and switches them for you.
         # Home Assistant answers plain HTTP on the local network, the Hue Bridge HTTPS with its own certificate.
         NSAppTransportSecurity:
@@ -54,7 +62,9 @@ targets:
             CFBundleURLSchemes: [housecontrol]
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: io.github.0xprobabillity.HouseControl
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.0xprobabillity.HouseControl3D
+        # Shared with the widgets: the home they draw, and the actions they queue.
+        HOUSE_APP_GROUP: group.io.github.0xprobabillity.HouseControl3D
         PRODUCT_NAME: HouseControl
         TARGETED_DEVICE_FAMILY: "1"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
@@ -62,6 +72,41 @@ targets:
         SWIFT_VERSION: "5.0"
         ENABLE_USER_SCRIPT_SANDBOXING: YES
         GENERATE_INFOPLIST_FILE: NO
+  # Home Screen, Lock Screen and StandBy widgets plus Control Center controls (../widgets).
+  HouseWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: ../widgets/Sources
+      - path: ../widgets/Resources
+        buildPhase: resources
+    dependencies:
+      - package: HouseCore
+      - sdk: WidgetKit.framework
+      - sdk: SwiftUI.framework
+    entitlements:
+      path: ../widgets/Config/iOS.entitlements
+      properties:
+        com.apple.security.application-groups: [$(HOUSE_APP_GROUP)]
+        keychain-access-groups: [$(AppIdentifierPrefix)io.github.0xprobabillity.HouseControl]
+    info:
+      path: ../widgets/Config/Info-iOS.plist
+      properties:
+        CFBundleDisplayName: House Control
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        HouseAppGroup: $(HOUSE_APP_GROUP)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.0xprobabillity.HouseControl3D.Widgets
+        HOUSE_APP_GROUP: group.io.github.0xprobabillity.HouseControl3D
+        PRODUCT_NAME: HouseWidgets
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_VERSION: "5.0"
+        GENERATE_INFOPLIST_FILE: NO
+        SKIP_INSTALL: YES
 schemes:
   HouseControl:
     build:
