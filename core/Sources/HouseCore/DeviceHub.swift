@@ -27,6 +27,8 @@ public final class DeviceHub {
         var id: String
         /// A temperature sensor for an AC's room reading, on any platform.
         var sensor: (service: String, id: String)?
+        /// Other devices of the same platform that follow every command sent to this one (`link.also`).
+        var also: [String] = []
     }
     private var serviceLinks: [String: Link] = [:]
     /// Sensors from other platforms that report the room of a Smart Life AC.
@@ -92,7 +94,8 @@ public final class DeviceHub {
                 let sensor = Self.sensorLink(device["sensor"])
                 if let link = device["link"] as? [String: Any], let service = link["service"] as? String,
                    let target = link["id"] as? String, !target.isEmpty {
-                    serviceLinks[id] = Link(kind: DeviceKind(rawValue: kind) ?? .light, service: service, id: target, sensor: sensor)
+                    serviceLinks[id] = Link(kind: DeviceKind(rawValue: kind) ?? .light, service: service, id: target, sensor: sensor,
+                                            also: (link["also"] as? [String] ?? []).filter { !$0.isEmpty && $0 != target })
                 } else if cloud != nil, let link = device["tuya"] as? [String: Any],
                           let deviceId = link["deviceId"] as? String, !deviceId.isEmpty {
                     links[id] = (kind, link)
@@ -170,6 +173,11 @@ public final class DeviceHub {
             let what = patch.keys.sorted().map { "\($0)=\(patch[$0] ?? "")" }.joined(separator: " ")
             do {
                 try await service.send(kind: link.kind, id: link.id, patch: patch, state: state)
+                // The devices grouped under this one get the same command; one failing does not undo the rest.
+                for other in link.also {
+                    do { try await service.send(kind: link.kind, id: other, patch: patch, state: state) }
+                    catch { log.write("\(appId) also \(other) → \(error.localizedDescription)") }
+                }
                 log.write("\(appId) [\(service.title)] \(what) → ok")
                 reply(["ok": true])
             } catch {
