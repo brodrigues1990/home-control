@@ -67,6 +67,14 @@ final class IslandController: NSObject {
         if let local = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged], handler: { moved($0); return $0 }) {
             monitors.append(local)
         }
+        // It opens on a click on the notch, not when the pointer merely rests there.
+        let clicked: (NSEvent) -> Void = { [weak self] _ in MainActor.assumeIsolated { self?.pointerClicked() } }
+        if let global = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown], handler: clicked) {
+            monitors.append(global)
+        }
+        if let local = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown], handler: { clicked($0); return $0 }) {
+            monitors.append(local)
+        }
         if pinned { setExpanded(true) }
     }
 
@@ -117,9 +125,15 @@ final class IslandController: NSObject {
                               width: Self.open.width + 28, height: notch.height + Self.open.height + 18 + 2)
             schedule(zone.contains(point) ? nil : false, after: 0.32)
         } else {
-            let zone = notch.insetBy(dx: -Self.ear, dy: 0).offsetBy(dx: 0, dy: 1)
-            schedule(zone.contains(point) ? true : nil, after: 0.09)
+            pending?.cancel() // a pointer resting on the notch no longer opens it; a click does
+            pending = nil
         }
+    }
+
+    private func pointerClicked() {
+        guard isShown, !pinned, !isExpanded else { return }
+        let zone = notch.insetBy(dx: -Self.ear, dy: 0).offsetBy(dx: 0, dy: 1)
+        if zone.contains(NSEvent.mouseLocation) { setExpanded(true) }
     }
 
     /// Opens or closes after a short dwell, so brushing past the notch does nothing; nil cancels.

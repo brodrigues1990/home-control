@@ -30,17 +30,27 @@ function glowMaterial() {
   return new THREE.MeshStandardMaterial({ color: '#8d8f96', roughness: 0.6, emissive: '#000000', emissiveIntensity: 1 });
 }
 
+// Every shadow-casting light costs a texture unit in each material's shader, and GPUs offer 16 of them:
+// past about a dozen lights the whole scene fails to compile and renders black. Only the first few
+// lights of a plan cast shadows; the rest still light the room.
+const SHADOW_LIGHTS = 8;
+let shadowSlots = SHADOW_LIGHTS;
+export function resetShadowBudget() { shadowSlots = SHADOW_LIGHTS; }
+const takeShadowSlot = () => shadowSlots-- > 0;
+
 function spot(intensity, y) {
   const light = new THREE.SpotLight(0xffffff, 0, 0, 1.2, 0.75, 2);
   light.position.set(0, y, 0);
   light.target.position.set(0, y - 1, 0);
-  light.castShadow = true;
-  light.shadow.mapSize.set(1024, 1024);
-  light.shadow.camera.near = 0.15;
-  light.shadow.camera.far = 9;
-  light.shadow.bias = -0.0006;
-  light.shadow.normalBias = 0.03;
-  light.shadow.radius = 5;
+  if (takeShadowSlot()) {
+    light.castShadow = true;
+    light.shadow.mapSize.set(1024, 1024);
+    light.shadow.camera.near = 0.15;
+    light.shadow.camera.far = 9;
+    light.shadow.bias = -0.0006;
+    light.shadow.normalBias = 0.03;
+    light.shadow.radius = 5;
+  }
   light.userData.max = intensity;
   return light;
 }
@@ -48,7 +58,7 @@ function spot(intensity, y) {
 function point(intensity, y, { shadow = true, distance = 0, x = 0, z = 0 } = {}) {
   const light = new THREE.PointLight(0xffffff, 0, distance, 2);
   light.position.set(x, y, z);
-  if (shadow) {
+  if (shadow && takeShadowSlot()) {
     light.castShadow = true;
     light.shadow.mapSize.set(512, 512);
     light.shadow.camera.near = 0.08;

@@ -6,7 +6,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { buildHouse } from './house.js';
 import { buildFurniture } from './furniture.js';
-import { LightUnit } from './lights.js';
+import { LightUnit, resetShadowBudget } from './lights.js';
 import { ACUnit } from './ac.js';
 
 export const STAGE_BG = '#0a0e1a';
@@ -48,6 +48,7 @@ export function createWorld(canvas, config, store, { onHover, onPick, background
   scene.add(buildFurniture(config.furniture));
 
   const lights = new Map();
+  resetShadowBudget();
   for (const cfg of config.lights) {
     const unit = new LightUnit(cfg, H);
     lights.set(cfg.id, unit);

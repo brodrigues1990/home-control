@@ -30,7 +30,7 @@
 - **A visual editor.** Draw the rooms, drop in furniture, place lamps and ACs, and link each one to a real device.
 - **Your devices, wherever they live.** Smart Life / Tuya, Home Assistant (and the thousands of brands it runs),
   Philips Hue and Apple Home — mixed freely in one home. See [Connect real devices](#connect-real-devices).
-- **An island around the notch.** Rest the pointer on the MacBook's notch and a small live model of the home drops
+- **An island around the notch.** Click the MacBook's notch and a small live model of the home drops
   out of it, with scenes and every device one click away. See [The island](#the-island).
 - **AI Access.** Give ChatGPT, Claude or any AI assistant a private link — or connect it over MCP — and it runs your
   lights and air conditioners, and rebuilds rooms in the 3D model from your photos. Served by your Mac; Stop ends it.
@@ -143,7 +143,7 @@ A black tab grows out of the MacBook's notch. On a display without a notch it is
 | Do this | To get this |
 | --- | --- |
 | Look at it | How many lights are on, and the target of a running AC |
-| Rest the pointer on it | It springs open: the 3D model, scenes, air conditioners and lights |
+| Click it | It springs open: the 3D model, scenes, air conditioners and lights |
 | Click a lamp in the model, or its chip | Toggle it; drag across a chip to dim |
 | Click a room in the model | Zoom in on it |
 | Move the pointer away | It closes |
