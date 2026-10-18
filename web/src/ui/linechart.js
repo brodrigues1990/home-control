@@ -44,7 +44,10 @@ export function createLineChart({ height = 132, yMax = null, format = String, co
     const width = el.clientWidth;
     el.querySelector('svg')?.remove();
     if (!width || t1 <= t0) return;
-    const pad = compact ? { l: 0, r: 0, t: 4, b: 4 } : { l: 34, r: 74, t: 8, b: 18 };
+    // Right margin fits the longest direct label ("name value", ~6px a character at 11px), capped at half the chart.
+    const labelChars = Math.max(0, ...series.map((s) => s.name.length)) + 8;
+    const padR = Math.min(Math.max(74, labelChars * 6 + 20), width * 0.5);
+    const pad = compact ? { l: 0, r: 0, t: 4, b: 4 } : { l: 34, r: padR, t: 8, b: 18 };
     const top = yMax ?? niceMax(Math.max(0, ...series.flatMap((s) => s.points.map((p) => p[1]))) * 1.1);
     const plotW = width - pad.l - pad.r;
     const plotH = height - pad.t - pad.b;
