@@ -78,7 +78,7 @@ const fixtures = {
     return {
       parts: [at(cyl(0.012, 0.012, H - y - 0.05, mat(DARK), 8), 0, y + 0.05, 0)],
       glow: [at(cyl(0.27, 0.27, 0.055, glowMaterial(), 40), 0, y, 0)],
-      lights: [spot(cfg.intensity ?? 20, y - 0.02)],
+      lights: [spot((cfg.intensity ?? 20) * (cfg.scale ?? 1), y - 0.02)],
       hit: [0.75, 0.5, 0.75, y],
     };
   },
@@ -93,7 +93,7 @@ const fixtures = {
         at(cyl(0.04, 0.05, 0.05, mat(DARK, { rough: 0.4, metal: 0.6 }), 16), 0, y + 0.14, 0),
       ],
       glow: [globe],
-      lights: [spot(cfg.intensity ?? 9, y - 0.05)],
+      lights: [spot((cfg.intensity ?? 9) * (cfg.scale ?? 1), y - 0.05)],
       hit: [0.6, 0.7, 0.6, y],
     };
   },
@@ -104,7 +104,7 @@ const fixtures = {
     return {
       parts: [at(box(0.95, 0.03, 0.05, mat(DARK, { rough: 0.5 }), { r: 0.01 }), 0, y + 0.05, 0)],
       glow,
-      lights: [spot(cfg.intensity ?? 20, y - 0.08)],
+      lights: [spot((cfg.intensity ?? 20) * (cfg.scale ?? 1), y - 0.08)],
       hit: [1.1, 0.45, 0.5, y],
     };
   },
@@ -117,7 +117,7 @@ const fixtures = {
         at(cyl(0.011, 0.011, 1.3, mat(DARK, { rough: 0.4, metal: 0.5 }), 8), 0, 0.02, 0),
       ],
       glow: [at(shade, 0, 1.28, 0)],
-      lights: [point(cfg.intensity ?? 3.4, 1.46)],
+      lights: [point((cfg.intensity ?? 3.4) * (cfg.scale ?? 1), 1.46)],
       hit: [0.6, 1.7, 0.6, 0.85],
     };
   },
@@ -130,7 +130,7 @@ const fixtures = {
         at(cyl(0.01, 0.01, 0.18, mat(DARK, { rough: 0.4, metal: 0.5 }), 8), 0, y + 0.02, 0),
       ],
       glow: [at(cyl(0.085, 0.125, 0.17, glowMaterial(), 28), 0, y + 0.18, 0)],
-      lights: [point(cfg.intensity ?? 1.5, y + 0.3)],
+      lights: [point((cfg.intensity ?? 1.5) * (cfg.scale ?? 1), y + 0.3)],
       hit: [0.5, 0.6, 0.5, y + 0.2],
     };
   },
@@ -142,7 +142,7 @@ const fixtures = {
     const lights = [];
     for (let i = 0; i < n; i++) {
       const x = -length / 2 + (length / n) * (i + 0.5);
-      lights.push(point((cfg.intensity ?? 1.6) / n, y, { shadow: false, distance: 3.2, x, z: 0.05 }));
+      lights.push(point(((cfg.intensity ?? 1.6) * (cfg.scale ?? 1)) / n, y, { shadow: false, distance: 3.2, x, z: 0.05 }));
     }
     return {
       parts: [],
@@ -190,6 +190,7 @@ export class LightUnit {
     this.hit.userData = { kind: 'light', id: cfg.id };
     this.group.add(this.hit);
 
+    this.scale = cfg.scale ?? 1;
     this.level = 0;        // eased 0..1 output
     this.goal = 0;
     this.color = new THREE.Color('#ffbd7a');
@@ -254,7 +255,8 @@ export class LightUnit {
       l.color.copy(this.color);
     }
     // Lamp bodies stay faintly readable when off and hot enough to bloom when on.
-    const e = this.level > 0.001 ? 0.8 + 1.7 * Math.pow(this.level, 0.7) : 0;
+    // `lightScale` in the plan dims the lamp bodies' glow too, so a dimmer home blooms less.
+    const e = this.level > 0.001 ? (0.8 + 1.7 * Math.pow(this.level, 0.7)) * Math.sqrt(this.scale) : 0;
     for (const m of this.glow) {
       m.emissive.copy(this.color);
       m.emissiveIntensity = e + this.hover * 0.5;

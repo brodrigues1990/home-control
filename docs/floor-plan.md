@@ -73,6 +73,7 @@ Heights (`y`, `sill`, `head`) are metres above the floor. Angles are degrees.
 | `wallHeight` | `2.6` | Height of the outer walls |
 | `interiorWallHeight` | `1.25` | How much of the inner walls is drawn, so they do not hide the rooms |
 | `outdoorTemp` | `27` | Used to estimate the room temperature of an AC that has no sensor |
+| `lightScale` | `1` | Dims every lamp in the model (0..1), when the lit rooms wash out the details |
 | `camera.azimuth`, `camera.elevation` | `34`, `47` | Default view. Walls facing the camera are cut away, so the azimuth decides which side is open |
 
 ## `rooms`
@@ -82,7 +83,9 @@ Heights (`y`, `sill`, `head`) are metres above the floor. Angles are degrees.
 | `id` | Unique. Lights and ACs refer to it |
 | `name` | Shown in the room filter |
 | `rect` | `[x, z, width, depth]` |
-| `floor` | `oak`, `walnut`, `tile` or `stone` |
+| `floor` | `oak`, `walnut`, `tile`, `stone`, `porcelain` or `terracotta` |
+| `wall` | Colour of its side of the walls, for example `"#a3a8af"` |
+| `outdoor` | `true` for a balcony: its outer walls become a low kerb with glass and a handrail |
 
 Rooms are rectangles. Where two of them touch, an inner wall appears on its own; make an L-shaped room out of two.
 
@@ -96,6 +99,8 @@ A gap in a wall, given by its two end points on that wall. It must be horizontal
 | `from`, `to` | `[x, z]` end points |
 | `sill`, `head` | Bottom and top of a window. Defaults `0.85` and `2.1` |
 
+A window in an inner wall is a pass-through: the wall stays up to its sill (a kitchen hatch over a bar).
+
 ## `furniture`
 
 Decoration only. Every piece has `type`, `pos` (`[x, z]` of its centre) and an optional `rot`.
@@ -106,14 +111,22 @@ Decoration only. Every piece has `type`, `pos` (`[x, z]` of its centre) and an o
 | `armchair` | `color` |
 | `coffeeTable` | `width` |
 | `rug` | `size` (`[width, depth]`), `color` |
-| `tv`, `sideboard`, `dresser`, `desk`, `vanity` | `width` |
-| `diningSet` | `width`, `chairs` |
-| `island` | `width`, `stools` |
+| `tv` | `width`, `mounted` (on the wall, no rack), `height` |
+| `sideboard`, `dresser`, `vanity` | `width` |
+| `desk` | `width`, `color`, `chair`, `monitor` (both `true` by default) |
+| `diningSet` | `width`, `chairs`, `round`, `glass`, `color`, `chairColor` |
+| `island` | `width`, `stools`, `body`, `top`, `seat` (colours) |
 | `kitchen` | `width`, `upper` (wall cabinets, `true` by default) |
 | `bed` | `width`, `color` |
-| `wardrobe`, `bookshelf` | `width`, `height` |
+| `wardrobe` | `width`, `height`, `color`, `mirror` (how many mirrored doors) |
+| `bookshelf` | `width`, `height` |
 | `plant` | `height` |
-| `fridge`, `nightstand`, `bathtub`, `toilet` | — |
+| `fridge`, `miniFridge` | `color` |
+| `shower` | `size` |
+| `curtains` | `width`, `height`, `color` |
+| `ceilingFan` | `ceiling` (height), `color` |
+| `floorFan` | `color` |
+| `nightstand`, `bathtub`, `toilet`, `washer` | — |
 
 ## `lights`
 

@@ -96,12 +96,19 @@ const builders = {
     );
   },
 
-  tv({ width = 1.7 }) {
-    const sw = width * 0.84;
+  // A TV on its rack, or `mounted` on the wall (`width` is then the screen's own width).
+  tv({ width = 1.7, mounted = false, height = 1.15 }) {
+    const sw = mounted ? width : width * 0.84;
     const sh = sw * 0.5625;
     const screen = new THREE.MeshStandardMaterial({
       color: '#05070c', roughness: 0.25, emissive: '#27407a', emissiveIntensity: 0.35,
     });
+    if (mounted) {
+      return group(
+        at(box(sw + 0.03, sh + 0.03, 0.04, mat(BLACK, { rough: 0.4 }), { r: 0.008 }), 0, height - sh / 2, -0.26),
+        at(box(sw - 0.02, sh - 0.02, 0.01, screen, { r: 0 }), 0, height - sh / 2 + 0.025, -0.235),
+      );
+    }
     return group(
       at(box(width, 0.36, 0.4, mat(DARK_WOOD, { rough: 0.6 }), { r: 0.015 }), 0, 0.1, 0),
       ...legs(width, 0.4, 0.1, mat(BLACK), 0.08, 0.015),
@@ -122,9 +129,29 @@ const builders = {
     );
   },
 
-  diningSet({ width = 1.8, chairs = 6 }) {
+  // `round`: a round table of diameter `width` with the chairs around it; `glass` top; colours.
+  diningSet({ width = 1.8, chairs = 6, round = false, glass = false, color = '#b48d63', chairColor = '#2b2e37' }) {
+    if (round) {
+      const top = glass
+        ? new THREE.MeshStandardMaterial({ color: '#bfd6df', roughness: 0.05, transparent: true, opacity: 0.45 })
+        : mat(color, { rough: 0.5 });
+      const g = group(
+        at(cyl(width / 2, width / 2, 0.03, top, 40), 0, 0.72, 0),
+        at(cyl(0.035, 0.035, 0.72, mat(METAL, { rough: 0.3, metal: 0.8 }), 12), 0, 0, 0),
+        at(cyl(0.28, 0.3, 0.02, mat(METAL, { rough: 0.3, metal: 0.8 }), 24), 0, 0, 0),
+      );
+      for (let i = 0; i < chairs; i++) {
+        const a = (i / chairs) * Math.PI * 2 + Math.PI / 4;
+        const c = chair(chairColor);
+        const r = width / 2 + 0.12;
+        c.position.set(Math.sin(a) * r, 0, Math.cos(a) * r);
+        c.rotation.y = a + Math.PI;
+        g.add(c);
+      }
+      return g;
+    }
     const depth = 0.95;
-    const wood = mat('#b48d63', { rough: 0.55 });
+    const wood = mat(color, { rough: 0.55 });
     const g = group(
       at(box(width, 0.05, depth, wood, { r: 0.02 }), 0, 0.71, 0),
       ...legs(width, depth, 0.71, mat(BLACK, { rough: 0.5 }), 0.1, 0.028),
@@ -135,7 +162,7 @@ const builders = {
       const side = i < perSide ? 1 : -1;
       const k = i < perSide ? i : i - perSide;
       const n = i < perSide ? perSide : chairs - perSide;
-      const c = chair('#2b2e37');
+      const c = chair(chairColor);
       c.position.set(-width / 2 + (width / n) * (k + 0.5), 0, side * (depth / 2 + 0.12));
       c.rotation.y = side > 0 ? Math.PI : 0;
       g.add(c);
@@ -143,17 +170,18 @@ const builders = {
     return g;
   },
 
-  island({ width = 2.0, stools = 3 }) {
+  // A counter with stools on its +z side: a kitchen island, or a breakfast bar against a wall.
+  island({ width = 2.0, stools = 3, body = '#39424f', top = '#e9e7e2', seat = '#c28a5a' }) {
     const g = group(
-      at(box(width - 0.12, 0.88, 0.62, mat('#39424f', { rough: 0.7 }), { r: 0.015 }), 0, 0, -0.04),
-      at(box(width, 0.05, 0.86, mat('#e9e7e2', { rough: 0.3 }), { r: 0.015 }), 0, 0.88, 0),
+      at(box(width - 0.12, 0.88, 0.62, mat(body, { rough: 0.7 }), { r: 0.015 }), 0, 0, -0.04),
+      at(box(width, 0.05, 0.86, mat(top, { rough: 0.3 }), { r: 0.015 }), 0, 0.88, 0),
     );
     for (let i = 0; i < stools; i++) {
       const x = -width / 2 + (width / stools) * (i + 0.5);
       g.add(group(
         at(cyl(0.16, 0.16, 0.012, mat(BLACK, { rough: 0.4 })), x, 0, 0.62),
         at(cyl(0.015, 0.015, 0.64, mat(METAL, { rough: 0.3, metal: 0.8 }), 10), x, 0, 0.62),
-        at(cyl(0.17, 0.15, 0.05, mat('#c28a5a', { rough: 0.9 })), x, 0.64, 0.62),
+        at(cyl(0.17, 0.15, 0.05, mat(seat, { rough: 0.6 })), x, 0.64, 0.62),
       ));
     }
     return g;
@@ -181,13 +209,91 @@ const builders = {
     return g;
   },
 
-  fridge() {
-    const body = mat('#c5c9d0', { rough: 0.35, metal: 0.5 });
+  fridge({ color = '#c5c9d0' }) {
+    const body = mat(color, { rough: 0.35, metal: 0.5 });
     return group(
       at(box(0.7, 1.92, 0.68, body, { r: 0.025 }), 0, 0, 0),
       at(box(0.66, 0.008, 0.005, mat('#7c8088'), { r: 0 }), 0, 1.25, 0.34),
       at(box(0.02, 0.5, 0.03, mat('#70747c', { metal: 0.7, rough: 0.3 }), { r: 0.008 }), -0.26, 1.34, 0.35),
       at(box(0.02, 0.4, 0.03, mat('#70747c', { metal: 0.7, rough: 0.3 }), { r: 0.008 }), -0.26, 0.76, 0.35),
+    );
+  },
+
+  // A corner shower: a tray and a glass enclosure, `size` metres square.
+  shower({ size = 0.9 }) {
+    const glass = new THREE.MeshStandardMaterial({ color: '#cfe3ea', roughness: 0.05, transparent: true, opacity: 0.3 });
+    const steel = mat(METAL, { rough: 0.25, metal: 0.9 });
+    const h = 1.95;
+    return group(
+      at(box(size, 0.06, size, mat(WHITE, { rough: 0.4 }), { r: 0.01 }), 0, 0, 0),
+      at(box(size, h, 0.01, glass, { r: 0 }), 0, 0.06, size / 2),
+      at(box(0.01, h, size, glass, { r: 0 }), size / 2, 0.06, 0),
+      at(box(size, 0.03, 0.03, steel, { r: 0 }), 0, h + 0.03, size / 2),
+      at(box(0.03, 0.03, size, steel, { r: 0 }), size / 2, h + 0.03, 0),
+      at(cyl(0.1, 0.1, 0.015, steel, 20), -size / 4, 2.0, -size / 4),
+    );
+  },
+
+  // A small bar fridge, which also serves as a bedside table.
+  miniFridge({ color = WHITE }) {
+    return group(
+      at(box(0.48, 0.84, 0.5, mat(color, { rough: 0.45 }), { r: 0.02 }), 0, 0, 0),
+      at(box(0.02, 0.3, 0.02, mat('#9a9fa8', { rough: 0.3, metal: 0.7 }), { r: 0.006 }), -0.18, 0.45, 0.255),
+    );
+  },
+
+  // Floor-length curtains, drawn to the sides of a window or a glass door `width` wide.
+  curtains({ width = 1.8, height = 2.4, color = '#e4e0d8' }) {
+    const cloth = mat(color, { rough: 1 });
+    const g = group(at(cyl(0.012, 0.012, width + 0.3, mat(METAL, { rough: 0.3, metal: 0.8 }), 8), 0, height, -0.22));
+    g.children[0].rotation.z = Math.PI / 2;
+    g.children[0].position.x = (width + 0.3) / 2;
+    for (const side of [-1, 1]) {
+      for (let k = 0; k < 4; k++) {
+        g.add(at(box(0.11, height, 0.06, cloth, { r: 0.02 }), side * (width / 2 - 0.05 - k * 0.1), 0.02, -0.2 + (k % 2) * 0.04));
+      }
+    }
+    return g;
+  },
+
+  // A ceiling fan with a light in its hub, hung from a `ceiling` that high.
+  ceilingFan({ ceiling = 2.6, color = WHITE }) {
+    const y = ceiling;
+    const m = mat(color, { rough: 0.5 });
+    const g = group(
+      at(cyl(0.02, 0.02, 0.3, m, 10), 0, y - 0.3, 0),
+      at(cyl(0.14, 0.12, 0.12, m, 24), 0, y - 0.42, 0),
+      at(cyl(0.11, 0.11, 0.03, new THREE.MeshStandardMaterial({ color: '#fff8ea', emissive: '#fff1d6', emissiveIntensity: 0.6 }), 24), 0, y - 0.45, 0),
+    );
+    for (let i = 0; i < 3; i++) {
+      const blade = at(box(0.62, 0.012, 0.12, m, { r: 0.004 }), 0, 0, 0);
+      blade.position.x = 0.42;
+      const arm = new THREE.Group();
+      arm.add(blade);
+      arm.position.y = y - 0.36;
+      arm.rotation.y = (i / 3) * Math.PI * 2;
+      g.add(arm);
+    }
+    return g;
+  },
+
+  // A pedestal fan.
+  floorFan({ color = '#3a3d44' }) {
+    const m = mat(color, { rough: 0.5 });
+    const head = at(cyl(0.22, 0.22, 0.1, mat('#5b5f68', { rough: 0.4, metal: 0.4 }), 24), 0, 1.15, 0);
+    head.rotation.x = Math.PI / 2;
+    return group(at(cyl(0.2, 0.22, 0.03, m, 24), 0, 0, 0), at(cyl(0.015, 0.015, 1.1, m, 10), 0, 0, 0), head);
+  },
+
+  // A front-loading washing machine, under a counter or beside it.
+  washer() {
+    const body = mat('#8a8e96', { rough: 0.35, metal: 0.5 });
+    const door = cyl(0.21, 0.21, 0.04, mat('#15161a', { rough: 0.2, metal: 0.3 }), 28);
+    door.rotation.x = Math.PI / 2;
+    return group(
+      at(box(0.6, 0.85, 0.6, body, { r: 0.02 }), 0, 0, 0),
+      at(box(0.46, 0.05, 0.02, mat('#2a2c32', { rough: 0.4 }), { r: 0 }), 0, 0.76, 0.3),
+      at(door, 0, 0.42, 0.3),
     );
   },
 
@@ -278,24 +384,37 @@ const builders = {
     return group(at(box(0.38, 0.78, 0.17, c, { r: 0.03 }), 0, 0, -0.24), bowl, lid);
   },
 
-  desk({ width = 1.4 }) {
-    const c = chair('#2b2e37');
-    c.position.z = 0.5;
-    c.rotation.y = Math.PI;
-    return group(
-      at(box(width, 0.04, 0.65, mat(WOOD, { rough: 0.55 }), { r: 0.012 }), 0, 0.72, 0),
+  desk({ width = 1.4, color = WOOD, chair: withChair = true, monitor = true }) {
+    const g = group(
+      at(box(width, 0.04, 0.65, mat(color, { rough: 0.55 }), { r: 0.012 }), 0, 0.72, 0),
       ...legs(width, 0.65, 0.72, mat(BLACK), 0.06, 0.02),
-      at(box(0.56, 0.34, 0.025, mat(BLACK, { rough: 0.3 }), { r: 0.008 }), 0, 0.86, -0.18),
-      at(box(0.2, 0.1, 0.12, mat(BLACK), { r: 0.008 }), 0, 0.76, -0.18),
-      c,
     );
+    if (monitor) {
+      g.add(at(box(0.56, 0.34, 0.025, mat(BLACK, { rough: 0.3 }), { r: 0.008 }), 0, 0.86, -0.18),
+        at(box(0.2, 0.1, 0.12, mat(BLACK), { r: 0.008 }), 0, 0.76, -0.18));
+    }
+    if (withChair) {
+      const c = chair('#2b2e37');
+      c.position.z = 0.5;
+      c.rotation.y = Math.PI;
+      g.add(c);
+    }
+    return g;
   },
 
-  wardrobe({ width = 1.6, height = 2.1 }) {
-    return group(
-      at(box(width, height, 0.6, mat(WHITE, { rough: 0.6 }), { r: 0.015 }), 0, 0, 0),
-      ...doorLines(width, height - 0.08, 0.04, 0.3, Math.max(2, Math.round(width / 0.55)), mat('#b9b6ae')),
+  // `mirror`: how many of its doors (from the right) are mirrors.
+  wardrobe({ width = 1.6, height = 2.1, color = WHITE, mirror = 0 }) {
+    const doors = Math.max(2, Math.round(width / 0.55));
+    const g = group(
+      at(box(width, height, 0.6, mat(color, { rough: 0.6 }), { r: 0.015 }), 0, 0, 0),
+      ...doorLines(width, height - 0.08, 0.04, 0.3, doors, mat('#b9b6ae')),
     );
+    const glass = mat('#c9d3dc', { rough: 0.05, metal: 0.9 });
+    const dw = width / doors;
+    for (let i = 0; i < Math.min(mirror, doors); i++) {
+      g.add(at(box(dw - 0.04, height - 0.16, 0.008, glass, { r: 0 }), width / 2 - dw * (i + 0.5), 0.08, 0.302));
+    }
+    return g;
   },
 
   bookshelf({ width = 1.0, height = 1.8 }) {
@@ -338,6 +457,12 @@ export function footprint(item) {
     case 'island': return [w || 2, 1.1];
     case 'kitchen': return [w || 3, 0.62];
     case 'fridge': return [0.7, 0.68];
+    case 'washer': return [0.6, 0.6];
+    case 'shower': return [item.size || 0.9, item.size || 0.9];
+    case 'miniFridge': return [0.48, 0.5];
+    case 'curtains': return [w || 1.8, 0.15];
+    case 'ceilingFan': return [1.4, 1.4];
+    case 'floorFan': return [0.44, 0.44];
     case 'bed': return [(w || 1.6) + 0.1, 2.14];
     case 'nightstand': return [0.46, 0.4];
     case 'dresser': return [w || 1.3, 0.45];

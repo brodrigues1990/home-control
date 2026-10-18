@@ -20,10 +20,10 @@ function wallSegments(config) {
   };
 
   for (const r of config.rooms) {
-    line('x', r.z).edges.push({ a: r.x, b: r.x + r.w, inside: 1 });
-    line('x', r.z + r.d).edges.push({ a: r.x, b: r.x + r.w, inside: -1 });
-    line('z', r.x).edges.push({ a: r.z, b: r.z + r.d, inside: 1 });
-    line('z', r.x + r.w).edges.push({ a: r.z, b: r.z + r.d, inside: -1 });
+    line('x', r.z).edges.push({ a: r.x, b: r.x + r.w, inside: 1, room: r });
+    line('x', r.z + r.d).edges.push({ a: r.x, b: r.x + r.w, inside: -1, room: r });
+    line('z', r.x).edges.push({ a: r.z, b: r.z + r.d, inside: 1, room: r });
+    line('z', r.x + r.w).edges.push({ a: r.z, b: r.z + r.d, inside: -1, room: r });
   }
   for (const o of config.openings) {
     const alongX = o.from[1] === o.to[1];
@@ -47,11 +47,14 @@ function wallSegments(config) {
         axis: l.axis, c: l.c, a: pts[i], b: pts[i + 1],
         kind: covering.length > 1 ? 'interior' : 'exterior',
         inside: covering[0].inside,
+        // the room on each side (+1: the side towards +axis), for wall colours and railings
+        rooms: Object.fromEntries(covering.map((e) => [e.inside, e.room])),
         opening: l.openings.find((o) => o.a < mid && mid < o.b) || null,
       };
       const prev = run[run.length - 1];
       if (prev && Math.abs(prev.b - seg.a) < EPS && prev.kind === seg.kind
-        && prev.inside === seg.inside && prev.opening === seg.opening) prev.b = seg.b;
+        && prev.inside === seg.inside && prev.opening === seg.opening
+        && prev.rooms[1] === seg.rooms[1] && prev.rooms[-1] === seg.rooms[-1]) prev.b = seg.b;
       else run.push(seg);
     }
     // Free ends get a small extension so corners close up.
@@ -87,6 +90,22 @@ export function buildHouse(config, camDir) {
   const wallBody = mat('#e7e3db', { rough: 0.95 });
   const wallCap = mat('#262b3a', { rough: 0.8 });
   const wallMats = [wallBody, wallBody, wallCap, wallBody, wallBody, wallBody];
+  // A room's "wall" colour paints the faces of its walls that look into it.
+  const paints = new Map();
+  const paint = (room) => {
+    if (!room?.wall) return wallBody;
+    if (!paints.has(room.wall)) paints.set(room.wall, mat(room.wall, { rough: 0.9 }));
+    return paints.get(room.wall);
+  };
+  // Box faces: +x, -x, top, bottom, +z, -z. A wall along x shows its rooms on ±z, one along z on ±x.
+  const facesFor = (s) => {
+    const plus = paint(s.rooms[1]);   // the room on the +axis side of the line
+    const minus = paint(s.rooms[-1]);
+    return s.axis === 'x' ? [wallBody, wallBody, wallCap, wallBody, plus, minus]
+                          : [plus, minus, wallCap, wallBody, wallBody, wallBody];
+  };
+  const rail = mat('#b9bec6', { rough: 0.3, metal: 0.8 });
+  const railGlass = new THREE.MeshStandardMaterial({ color: '#a9c4d8', roughness: 0.1, transparent: true, opacity: 0.25 });
   const blocker = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false });
   const glass = new THREE.MeshStandardMaterial({
     color: '#9cc0ff', roughness: 0.08, transparent: true, opacity: 0.22,
@@ -109,6 +128,7 @@ export function buildHouse(config, camDir) {
   for (const s of wallSegments(config)) {
     const exterior = s.kind === 'exterior';
     const t = exterior ? EXT_T : INT_T;
+    const faces = facesFor(s);
     // Outward normal of an exterior wall points away from its room.
     const nx = s.axis === 'z' ? -s.inside : 0;
     const nz = s.axis === 'x' ? -s.inside : 0;
@@ -118,16 +138,24 @@ export function buildHouse(config, camDir) {
     const type = s.opening?.type;
 
     if (near) {
-      if (type !== 'door') piece(s, a, b, 0, CURB, t);
+      if (type !== 'door') piece(s, a, b, 0, CURB, t, faces);
       continue;
     }
     if (type === 'door' || type === 'open') continue;
 
+    // The open side of a balcony ("outdoor": true): a low kerb, glass and a metal handrail.
+    if (exterior && s.rooms[s.inside]?.outdoor) {
+      piece(s, a, b, 0, 0.12, t, faces);
+      piece(s, a, b, 0.12, 0.98, 0.02, railGlass).castShadow = false;
+      piece(s, a, b, 0.98, 1.04, 0.06, rail);
+      continue;
+    }
+
     const height = exterior ? H : Hi;
     if (type === 'window' && exterior) {
       const { sill, head } = s.opening;
-      piece(s, a, b, 0, sill, t);
-      piece(s, a, b, Math.min(head, H), H, t);
+      piece(s, a, b, 0, sill, t, faces);
+      piece(s, a, b, Math.min(head, H), H, t, faces);
       const pane = piece(s, a, b, sill, head, 0.03, glass);
       pane.castShadow = false;
       const fw = 0.05;
@@ -136,9 +164,10 @@ export function buildHouse(config, camDir) {
       for (const [fa, fb, y0, y1] of bars) piece(s, fa, fb, y0, y1, 0.07, frame);
       continue;
     }
-    if (type === 'window') continue; // a window in an interior wall is just a gap
+    // A window in an interior wall is a pass-through: the wall stops at the sill.
+    if (type === 'window') { piece(s, a, b, 0, Math.min(s.opening.sill, height), t, faces); continue; }
 
-    piece(s, a, b, 0, height, t);
+    piece(s, a, b, 0, height, t, faces);
     // Interior walls are drawn cut low, but lamps should still be contained by the
     // real, full-height wall: an invisible shadow caster fills in the missing part.
     if (!exterior && Hi < H) piece(s, a, b, Hi, H, 0.04, blocker).receiveShadow = false;

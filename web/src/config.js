@@ -28,7 +28,7 @@ export const SERVICES = {
   hue: { name: 'Philips Hue', short: 'Hue' },
   homekit: { name: 'Apple Home', short: 'Apple Home' },
 };
-export const FLOOR_KINDS = ['oak', 'walnut', 'tile', 'stone'];
+export const FLOOR_KINDS = ['oak', 'walnut', 'tile', 'stone', 'porcelain', 'terracotta'];
 
 // The plan exactly as written on disk (the editor works on this form).
 export async function loadRawConfig() {
@@ -71,7 +71,7 @@ export function normalize(raw) {
       `Room "${r.id}" needs "rect": [x, z, width, depth]`);
     const [x, z, w, d] = r.rect;
     need(w > 0 && d > 0, `Room "${r.id}" has an empty rect`);
-    return { id: r.id, name: r.name || r.id, x, z, w, d, floor: r.floor || 'oak' };
+    return { id: r.id, name: r.name || r.id, x, z, w, d, floor: r.floor || 'oak', wall: r.wall || null, outdoor: Boolean(r.outdoor) };
   });
   const roomIds = new Set(rooms.map((r) => r.id));
 
@@ -91,6 +91,7 @@ export function normalize(raw) {
       name: l.name || l.id,
       rot: l.rot || 0,
       capabilities: l.capabilities || [], // plain smart plugs: on/off only
+      scale: raw.lightScale ?? 1, // the plan's `lightScale` (0..1) dims every lamp in the model
     };
   });
 

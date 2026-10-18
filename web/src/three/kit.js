@@ -124,6 +124,8 @@ const FLOORS = {
   walnut: () => planks('#94705a'),
   tile: () => tiles('#d5dade', 4, '#aab0b8'),
   stone: () => tiles('#a2a7ae', 3, '#7c828b'),
+  porcelain: () => tiles('#e8e5df', 4, '#c9c4bb'),   // large glossy 60 cm tiles
+  terracotta: () => tiles('#9c4b33', 8, '#6f3727'),  // small fired-clay tiles, outdoors
 };
 
 const floorMaterials = new Map();
@@ -133,7 +135,7 @@ export function floorMaterial(kind) {
   if (!floorMaterials.has(name)) {
     floorMaterials.set(name, new THREE.MeshStandardMaterial({
       map: FLOORS[name](),
-      roughness: name === 'tile' || name === 'stone' ? 0.55 : 0.75,
+      roughness: { tile: 0.55, stone: 0.55, porcelain: 0.22, terracotta: 0.6 }[name] ?? 0.75,
     }));
   }
   return floorMaterials.get(name);
