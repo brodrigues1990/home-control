@@ -41,6 +41,6 @@ Widget types:
 | `chart` | `series[{name, entity}]`, `hours`, `unit`, `max` |
 | `net` | `up`, `down`, `unit`, `hours` |
 | `links` | `items[{name, url, status, above, onDemand}]`, `columns` |
-| `power` | `items[{name, entity}]`, `hours` |
+| `power` | `items[{name, entity}]`, `hours`, optional `total` (the whole-home meter: shown as the figure for the whole home) `rest` (label of a bar for the meter minus every device) and `totalName` (label of a bar for the meter itself) |
 | `batteries` | `items[{name, entity, attribute, charging, hideUnavailable, low}]` |
 | `countdown` | `status` (template sensor `sensor.countdowns`, its `ativos` attribute lists the running timers), `topic` (input_select of ntfy topics), scripts `start`, `pause`, `resume`, `stop` (all take `minutos`), `minutes` (the chips; default 5…60) |

@@ -488,7 +488,9 @@ export function createDashboard(spec, { chips, onTab = () => {}, onStates = () =
         const on = state(w.entity) === 'on';
         const watts = num(state(w.watts));
         c.el.classList.toggle('on', on);
-        c.setSub(on ? ['On', watts != null ? `${Math.round(watts)} W` : null].filter(Boolean).join(' · ') : 'Off');
+        const gone = ['unavailable', 'unknown'].includes(state(w.entity)); // unplugged, or the plug is off the network
+        c.el.classList.toggle('gone', gone);
+        c.setSub(on ? ['On', watts != null ? `${Math.round(watts)} W` : null].filter(Boolean).join(' · ') : gone ? 'Offline' : 'Off');
         if (w.plan && ha[w.entity]) {
           onPlanAC(w.plan, { on, target: 23, mode: 'cool', eco: false, fan: 'auto' },
             { modes: ['cool'], fans: ['auto'], sleep: false, eco: false, swing: false });
@@ -789,24 +791,34 @@ export function createDashboard(spec, { chips, onTab = () => {}, onStates = () =
   /* ---------- energy ---------- */
 
   // What each device draws now, as bars sorted by size, and the total over the last hours.
+  // `total`: the whole-home meter. For the whole home it is then the figure shown (not the sum
+  // of the devices), and `rest` (a label) adds a bar for what no device meter accounts for:
+  // the meter minus every device. For one room the figure is the sum of that room's devices.
   function powerUse(w) {
     const items = w.items || [];
     const hours = w.hours || 3;
-    const store = history(items.map((i) => i.entity), hours);
+    const store = history([...items.map((i) => i.entity), ...(w.total ? [w.total] : [])], hours);
     const total = h('b');
     const plot = createLineChart({ height: 40, compact: true, format: (v) => `${Math.round(v)} W`, label: 'Total power' });
-    const rows = items.map((item) => {
+    const makeRow = (item) => {
       const fill = h('i.bar-fill');
       const value = h('span.bar-value');
       const el = h('div.bar-row', h('span.bar-name', item.name), h('span.bar-track', fill), value);
       return { item, el, fill, value, watts: null };
-    });
-    const list = h('div.bar-list', rows.map((r) => r.el));
+    };
+    const rows = items.map(makeRow);
+    const rest = w.total && w.rest ? makeRow({ name: w.rest }) : null;
+    // `totalName`: the meter itself as a bar too (the longest one), not added to the devices.
+    const meterRow = w.total && w.totalName ? makeRow({ name: w.totalName }) : null;
+    const all = [...rows, ...(rest ? [rest] : []), ...(meterRow ? [meterRow] : [])];
+    const list = h('div.bar-list', all.map((r) => r.el));
     const el = h('div.dash-power',
-      h('div.pw-head', h('div.pw-total', h('span.pw-label', 'Using now'), h('div', total, h('small', 'W'))), h('div.pw-spark', plot.el)),
+      h('div.pw-head', h('div.pw-total', h('span.pw-label', w.label || 'Using now'), h('div', total, h('small', 'W'))), h('div.pw-spark', plot.el)),
       list);
+    const metered = () => Boolean(w.total) && roomSel === 'all';
     // Sum of every device at each moment (each holds its last reading until the next one).
     const totalSeries = () => {
+      if (metered()) return store.data[w.total] || [];
       const series = items.filter(visible).map((i) => store.data[i.entity] || []).filter((p) => p.length);
       const times = [...new Set(series.flatMap((p) => p.map((x) => x[0])))].sort((a, b) => a - b);
       return times.map((t) => [t, series.reduce((sum, p) => sum + (valueAt(p, t) ?? 0), 0)]);
@@ -822,11 +834,19 @@ export function createDashboard(spec, { chips, onTab = () => {}, onStates = () =
       update() {
         for (const r of rows) { r.watts = num(state(r.item.entity)); r.el.hidden = !visible(r.item); }
         const mine = rows.filter((r) => !r.el.hidden);
-        el.hidden = !mine.length; // no metered device in this room
-        const sum = mine.reduce((s, r) => s + (r.watts ?? 0), 0);
-        const top = Math.max(1, ...mine.map((r) => r.watts ?? 0));
+        const devices = mine.reduce((s, r) => s + (r.watts ?? 0), 0);
+        const meter = metered() ? num(state(w.total)) : null;
+        const sum = meter ?? devices;
+        if (rest) {
+          rest.el.hidden = meter == null;
+          rest.watts = meter == null ? null : Math.max(0, meter - devices);
+        }
+        if (meterRow) { meterRow.el.hidden = meter == null; meterRow.watts = meter; }
+        const shown = all.filter((r) => !r.el.hidden);
+        el.hidden = !mine.length && meter == null; // no metered device in this room
+        const top = Math.max(1, ...shown.map((r) => r.watts ?? 0));
         total.textContent = Math.round(sum);
-        const sorted = [...rows].sort((a, b) => (b.watts ?? -1) - (a.watts ?? -1));
+        const sorted = [...all].sort((a, b) => (b.watts ?? -1) - (a.watts ?? -1));
         sorted.forEach((r, i) => {
           if (list.children[i] !== r.el) list.insertBefore(r.el, list.children[i] || null);
           const known = r.watts != null;

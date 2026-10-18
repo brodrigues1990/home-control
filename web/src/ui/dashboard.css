@@ -354,3 +354,6 @@ html.ios .dash .chip { min-height: 60px; }
 @media (orientation: portrait) and (min-width: 700px) {
   html.ios .card.has-dash { --stage-h: max(470px, 46vh); }
 }
+
+/* a plug that is unplugged or off the network */
+.dash-card.gone { opacity: 0.55; }
