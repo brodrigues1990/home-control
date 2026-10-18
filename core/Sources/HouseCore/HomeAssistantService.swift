@@ -55,7 +55,7 @@ public final class HomeAssistantService: DeviceService {
     /// For the iPhone: the Mac shares its connection over the paired, encrypted sync.
     public var shareable: [String: Any]? {
         guard let config else { return nil }
-        return ["url": config.url, "token": config.token, "name": config.name ?? "", "version": config.version ?? ""]
+        return ["url": Self.phoneURL() ?? config.url, "token": config.token, "name": config.name ?? "", "version": config.version ?? ""]
     }
 
     // MARK: - Connecting
@@ -117,14 +117,25 @@ public final class HomeAssistantService: DeviceService {
     /// Entities that must never be listed or switched, e.g. the plug that powers this Mac or the
     /// router: `homeassistant-blocked.json` in the data folder, a JSON array of entity ids.
     /// Read on every use, so editing the file takes effect without restarting.
-    static func blockedEntities() -> Set<String> {
-        let directory: URL
+    private static var dataDirectory: URL {
         if let custom = ProcessInfo.processInfo.environment["HOUSE_DATA_DIR"], !custom.isEmpty {
-            directory = URL(fileURLWithPath: (custom as NSString).expandingTildeInPath, isDirectory: true)
-        } else {
-            directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent("HouseControl", isDirectory: true)
+            return URL(fileURLWithPath: (custom as NSString).expandingTildeInPath, isDirectory: true)
         }
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("HouseControl", isDirectory: true)
+    }
+
+    /// The address the iPhone should use, when the Mac's own (a tunnel on 127.0.0.1) is not
+    /// reachable from it: `homeassistant-phone.json` in the data folder, `{"url": "http://…"}`.
+    static func phoneURL() -> String? {
+        guard let data = try? Data(contentsOf: dataDirectory.appendingPathComponent("homeassistant-phone.json")),
+              let url = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["url"] as? String,
+              let clean = try? normalize(url) else { return nil }
+        return clean
+    }
+
+    static func blockedEntities() -> Set<String> {
+        let directory = dataDirectory
         guard let data = try? Data(contentsOf: directory.appendingPathComponent("homeassistant-blocked.json")),
               let ids = try? JSONSerialization.jsonObject(with: data) as? [String] else { return [] }
         return Set(ids)
