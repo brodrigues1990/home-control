@@ -17,6 +17,7 @@ public struct Dashboard {
     private static let domains: Set<String> = [
         "script", "switch", "light", "fan", "climate", "media_player", "sensor", "binary_sensor", "device_tracker",
         "input_boolean", "input_select", "input_number", "select", "number", "button", "sun", "vacuum",
+        "camera",
     ]
 
     public static func url(in directory: URL) -> URL { directory.appendingPathComponent("dashboard.json") }
@@ -51,10 +52,11 @@ public struct Dashboard {
     }
 
     /// One entity of the dashboard, by a service of its own domain, or a dashboard script
-    /// run directly with its fields (`script.ar_escritorio` with `temperatura`…).
+    /// run directly with its fields (`script.ar_escritorio` with `temperatura`…). A camera (the
+    /// robot vacuum's map) is only read.
     public func allows(domain: String, service: String, data: [String: Any]) -> Bool {
         if let target = data["entity_id"] as? String {
-            return entities.contains(target) && target.hasPrefix(domain + ".")
+            return entities.contains(target) && target.hasPrefix(domain + ".") && domain != "camera"
         }
         return domain == "script" && entities.contains("script.\(service)")
     }

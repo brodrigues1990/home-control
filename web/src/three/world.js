@@ -45,7 +45,9 @@ export function createWorld(canvas, config, store, { onHover, onPick, background
 
   const house = buildHouse(config, camDir);
   scene.add(house.group);
-  scene.add(buildFurniture(config.furniture));
+  const furniture = buildFurniture(config.furniture);
+  scene.add(furniture);
+  const livePieces = furniture.userData.live || [];
 
   const lights = new Map();
   resetShadowBudget();
@@ -323,6 +325,7 @@ export function createWorld(canvas, config, store, { onHover, onPick, background
     let active = updateRig(dt);
     for (const unit of lights.values()) active = unit.update(dt) || active;
     for (const unit of acs.values()) active = unit.update(dt) || active;
+    for (const piece of livePieces) active = piece.update(dt) || active;
     if (shadowFrames > 0) { renderer.shadowMap.needsUpdate = true; shadowFrames--; active = true; }
     if (active || awake > 0) {
       composer.render(dt);
@@ -353,6 +356,12 @@ export function createWorld(canvas, config, store, { onHover, onPick, background
   const world = {
     lights,
     acs,
+
+    /** Home Assistant's states for the live parts of the model (the robot vacuum): `get(entity)` -> {state, attributes}. */
+    applyStates(get) {
+      for (const piece of livePieces) piece.apply(get);
+      if (livePieces.length) wake();
+    },
 
     setInsets(top, bottom) { topInset = top; bottomInset = bottom; resize(); },
     resize,
@@ -403,6 +412,7 @@ export function createWorld(canvas, config, store, { onHover, onPick, background
         updateRig(0.05);
         for (const unit of lights.values()) unit.update(0.05);
         for (const unit of acs.values()) unit.update(0.05);
+        for (const piece of livePieces) piece.update(0.05);
       }
       renderer.shadowMap.needsUpdate = true;
       composer.render(0);

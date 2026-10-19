@@ -32,7 +32,7 @@ function acTemperatureColor(target, cfg) {
   return tmp.set('#1c4fc0').lerp(new THREE.Color('#8a3d12'), t).clone();
 }
 
-export function createPanel(root, config, store, { onFocus, onMenu, onModel = () => {} }) {
+export function createPanel(root, config, store, { onFocus, onMenu, onModel = () => {}, onStates = () => {} }) {
   const { state } = store;
   const ui = { room: 'all', sheet: null };
   let world = null;
@@ -262,7 +262,7 @@ export function createPanel(root, config, store, { onFocus, onMenu, onModel = ()
       onTab: (tab) => { currentTab = tab; applyTab(); },
       // Home Assistant's latest states, for the header's temperature.
       // (the first states arrive while the panel is still being built: refresh it only once it is)
-      onStates: (get) => { liveStates = get; if (built) update(); },
+      onStates: (get) => { liveStates = get; if (built) update(); onStates(get); },
       onPlanAC: (id, s, features) => store.applyRemote({ acs: { [id]: s }, features: { [id]: features } }),
       // a pop-up list (the washer's programmes), drawn like the AC's mode menu
       menu: (anchor, items) => openMenu(clip, anchor, items.map((i) => ({ ...i, icon: i.selected ? icon('check', 16, 2.4) : null }))),

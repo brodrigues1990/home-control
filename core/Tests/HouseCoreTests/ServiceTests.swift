@@ -126,6 +126,14 @@ final class ServiceTests: XCTestCase {
         XCTAssertThrowsError(try HomeAssistantService.normalize(""))
     }
 
+    func testDashboardReadsTheVacuumMapCameraButNeverCallsIt() throws {
+        let file = #"{"tabs": [{"widgets": [{"type": "vacuum", "entity": "vacuum.robo", "map": "camera.robo_map"}]}]}"#
+        let dashboard = try XCTUnwrap(Dashboard(data: Data(file.utf8)))
+        XCTAssertEqual(dashboard.entities, ["vacuum.robo", "camera.robo_map"])
+        XCTAssertTrue(dashboard.allows(domain: "vacuum", service: "start", data: ["entity_id": "vacuum.robo"]))
+        XCTAssertFalse(dashboard.allows(domain: "camera", service: "snapshot", data: ["entity_id": "camera.robo_map"]))
+    }
+
     // MARK: - Hue
 
     func testHueReadsAndWritesLights() {

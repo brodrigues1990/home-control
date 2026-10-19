@@ -285,6 +285,127 @@ const builders = {
     return group(at(cyl(0.2, 0.22, 0.03, m, 24), 0, 0, 0), at(cyl(0.015, 0.015, 1.1, m, 10), 0, 0, 0), head);
   },
 
+  // A robot vacuum on the floor: a low white disc with a lidar turret. `entity` (its vacuum):
+  //  - on its dock (docked, idle, paused...): connected, Wi-Fi arcs rise from it;
+  //  - out cleaning or returning: it is away from here, so it is drawn ghosted with a tag;
+  //  - unavailable: not connected, an orange "off" badge floats over it.
+  // Where it is right now comes from `position` (Xiaomi Home) or `map` (Dreame Vacuum's map camera).
+  robotVacuum({ entity = null, color = '#7dd3fc', position = null, origin = [0, 0], map = null, mapScale = 1, pos: home = [0, 0] }) {
+    const body = (c, o = {}) => new THREE.MeshStandardMaterial({ color: c, roughness: o.rough ?? 0.4, transparent: true, opacity: 1, ...o });
+    const mats = [body('#e9eaee', { rough: 0.35 }), body('#1c1d22'), body('#2b2d34')];
+    const body3 = group(
+      at(cyl(0.17, 0.17, 0.08, mats[0], 36), 0, 0.005, 0),
+      at(cyl(0.12, 0.12, 0.004, mats[1], 28), 0, 0.085, 0),
+      at(cyl(0.04, 0.04, 0.03, mats[2], 18), 0.03, 0.085, -0.02),
+    );
+    const g = group(body3);
+    const drive = body3; // moves with the robot's live position; the sprites follow it
+    const glyph = (draw, tint, size) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = 128;
+      const ctx = canvas.getContext('2d');
+      ctx.strokeStyle = ctx.fillStyle = '#ffffff';
+      ctx.lineWidth = 11;
+      ctx.lineCap = ctx.lineJoin = 'round';
+      draw(ctx);
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, color: new THREE.Color(tint).multiplyScalar(1.6), transparent: true, opacity: 0, depthWrite: false, toneMapped: false }));
+      sprite.scale.setScalar(size);
+      sprite.renderOrder = 12;
+      sprite.visible = false;
+      body3.add(sprite);
+      return sprite;
+    };
+    const arc = (ctx, r) => { ctx.beginPath(); ctx.arc(64, 96, r, Math.PI * 1.22, Math.PI * 1.78); ctx.stroke(); };
+    const waves = Array.from({ length: 3 }, (_, i) => {
+      const w = glyph((ctx) => arc(ctx, 70), color, 0.2);
+      w.center.set(0.5, 0.2);
+      w.userData.offset = i / 3;
+      return w;
+    });
+    // a price tag: the robot is out working
+    const tag = glyph((ctx) => {
+      ctx.beginPath(); ctx.moveTo(26, 28); ctx.lineTo(70, 28); ctx.lineTo(108, 66); ctx.lineTo(70, 104); ctx.lineTo(26, 66); ctx.closePath(); ctx.stroke();
+      ctx.beginPath(); ctx.arc(48, 48, 7, 0, Math.PI * 2); ctx.fill();
+    }, '#7dd3fc', 0.32);
+    // orange: not connected (Wi-Fi arc crossed out)
+    const off = glyph((ctx) => {
+      arc(ctx, 70);
+      ctx.beginPath(); ctx.arc(64, 96, 8, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(24, 28); ctx.lineTo(104, 108); ctx.stroke();
+    }, '#ff9a2e', 0.34);
+    let mode = 'docked'; // docked | away | offline
+    let ghost = 0;
+    let clock = 0;
+    const target = { x: 0, z: 0, yaw: null };
+    const here = { x: 0, z: 0, yaw: 0 };
+    // the next place to glide to, from the dock; the first one is taken at once
+    const aim = (x, z, yaw) => {
+      if (target.yaw == null) { here.x = x; here.z = z; here.yaw = yaw; }
+      target.x = x;
+      target.z = z;
+      target.yaw = yaw;
+    };
+    g.userData.live = {
+      apply(get) {
+        if (position) {
+          // Xiaomi Home: {"position":[x_mm, y_mm, yaw_mrad]} in the robot's map frame; `origin` places the map's
+          // top-left (12.25 m tall) on the plan, `pos` is where it rests on its dock
+          try {
+            const [x, y, yaw] = JSON.parse(get(position)?.state).position;
+            const px = origin[0] + (x + 3250) / 1000;
+            const pz = origin[1] + 12.25 - (y + 3850) / 1000;
+            aim(px - home[0], pz - home[1], -yaw / 1000 + Math.PI / 2);
+          } catch { /* no position yet */ }
+        }
+        if (map) {
+          // Dreame Vacuum: the camera's `vacuum_position` and `charger_position`, {x, y} in mm (y up) and `a` in
+          // degrees. The dock is at `pos` and `rot` turns the robot's map about it; `mapScale` stretches the
+          // robot's metres onto a plan not drawn quite to size.
+          const { vacuum_position: v, charger_position: c } = get(map)?.attributes || {};
+          if (v && c) aim(((v.x - c.x) / 1000) * mapScale, (-(v.y - c.y) / 1000) * mapScale, THREE.MathUtils.degToRad(v.a));
+        }
+        const state = String(get(entity)?.state ?? 'unavailable');
+        mode = ['unavailable', 'unknown', ''].includes(state) ? 'offline' : ['cleaning', 'returning'].includes(state) ? 'away' : 'docked';
+      },
+      update(dt) {
+        clock += dt;
+        // glide between the position samples (about every 2 s), and turn the short way
+        const k = Math.min(1, dt * 2.5);
+        here.x += (target.x - here.x) * k;
+        here.z += (target.z - here.z) * k;
+        if (target.yaw != null) {
+          let d = (target.yaw - here.yaw) % (Math.PI * 2);
+          if (d > Math.PI) d -= Math.PI * 2; else if (d < -Math.PI) d += Math.PI * 2;
+          here.yaw += d * k;
+        }
+        drive.position.set(here.x, 0, here.z);
+        drive.rotation.y = here.yaw;
+        const goal = mode === 'away' ? 1 : 0;
+        ghost += (goal - ghost) * Math.min(1, dt * 3);
+        if (Math.abs(goal - ghost) < 0.004) ghost = goal;
+        for (const m of mats) m.opacity = 1 - 0.78 * ghost;
+        tag.visible = ghost > 0.02;
+        tag.position.set(0, 0.3 + Math.sin(clock * 2) * 0.015, 0);
+        tag.material.opacity = ghost;
+        off.visible = mode === 'offline';
+        off.position.set(0, 0.28 + Math.sin(clock * 3) * 0.02, 0);
+        off.material.opacity = 0.75 + 0.25 * Math.sin(clock * 4);
+        for (const w of waves) {
+          w.visible = mode === 'docked';
+          if (!w.visible) continue;
+          const t = (clock / 2.6 + w.userData.offset) % 1;
+          w.position.set(0, 0.1 + t * 0.3, 0);
+          w.scale.set(0.1 + t * 0.26, 0.05 + t * 0.13, 1);
+          w.material.opacity = 0.6 * Math.sin(Math.PI * t);
+        }
+        return true; // the badge pulses, the arcs drift: always moving
+      },
+    };
+    return g;
+  },
+
   // A front-loading washing machine, under a counter or beside it.
   washer() {
     const body = mat('#8a8e96', { rough: 0.35, metal: 0.5 });
@@ -458,6 +579,7 @@ export function footprint(item) {
     case 'kitchen': return [w || 3, 0.62];
     case 'fridge': return [0.7, 0.68];
     case 'washer': return [0.6, 0.6];
+    case 'robotVacuum': return [0.34, 0.34];
     case 'shower': return [item.size || 0.9, item.size || 0.9];
     case 'miniFridge': return [0.48, 0.5];
     case 'curtains': return [w || 1.8, 0.15];
@@ -479,6 +601,7 @@ export function footprint(item) {
 
 export function buildFurniture(items) {
   const root = new THREE.Group();
+  const live = []; // pieces that follow Home Assistant: apply(get) and update(dt)
   for (const item of items) {
     const make = builders[item.type];
     if (!make || !Array.isArray(item.pos)) {
@@ -493,6 +616,8 @@ export function buildFurniture(items) {
       if (o.isMesh) { o.castShadow = !flat; o.receiveShadow = true; }
     });
     root.add(g);
+    if (g.userData.live) live.push(g.userData.live);
   }
+  root.userData.live = live;
   return root;
 }

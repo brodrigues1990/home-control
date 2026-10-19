@@ -62,6 +62,7 @@ async function boot() {
   }
 
   let world;
+  let lastStates = null; // Home Assistant's states may arrive before the 3D view exists
   let modelShown = true; // false on a dashboard tab without the 3D model
   const panel = createPanel(app, config, store, {
     onModel(on) {
@@ -69,6 +70,7 @@ async function boot() {
       world?.setRunning(on && !document.hidden);
       if (on) world?.resize();
     },
+    onStates(get) { lastStates = get; world?.applyStates(get); },
     onFocus: (target) => world?.focus(target),
     onMenu: (anchor, reason) => {
       if (reason === 'escape') post('close');
@@ -88,6 +90,7 @@ async function boot() {
         else if (target.kind === 'room') panel.selectRoom(target.id);
       },
     });
+    if (lastStates) world.applyStates(lastStates);
   } catch (error) {
     fatal('3D view failed to start', error);
     return;
