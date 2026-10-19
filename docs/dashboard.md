@@ -39,7 +39,7 @@ Widget types:
 | `actions` | `script`, shared `variables`, `items[{label, icon?, variables, script?}]`: a row of one-tap script chips |
 | `washer` | `script` (+ `fields.action`, verbs iniciar/pausar/acordar/desligar), `status`, `remaining`, `remoteStart`, `course` (select, picked from a pop-up menu), `delay` (number, the delayed end in h), `cycles`, `tubClean`, `energyToday`, `energyMonth`, `labels` |
 | `status` | `items[{name, icon, entity, off[], labels{}, above, unit, remaining, battery, color}]` (`battery`: a % sensor shown beside the state) |
-| `lights` | `ids` (plan light ids, or an AC's: its card with power and temperature, a click opens all its controls), `columns` |
+| `lights` | `ids` (plan light ids, or an AC's: its card with power and temperature, a click opens all its controls), `columns`. A dimmable light takes a row of its own, above the others |
 | `glance` | `items[{name, entity, copy, detail (attribute), strip (regex), status, unit, decimals, note, since}]` (`since`: `day` or `month`, with a meter as `entity`, such as the whole-home kWh total: its use since the day or month began, from Home Assistant's long-term statistics) |
 | `chart` | `series[{name, entity}]`, `hours`, `unit`, `max` |
 | `net` | `up`, `down`, `unit`, `hours` |

@@ -428,16 +428,14 @@ export function createDashboard(spec, { chips, onTab = () => {}, onStates = () =
     return { el: row, update() { items.forEach((fn) => fn()); } };
   }
 
-  // The plan's own lights (and ACs), by their ids in the plan.
+  // The plan's own lights (and ACs), by their ids in the plan. A dimmable light takes a row of its
+  // own, so its brightness has the whole width to be dragged across; those come first.
   function lights(w) {
     const cols = w.columns || Math.min(3, (w.ids || []).length || 1);
     const grid = h(`div.dash-lights${cols >= 3 ? '.many' : ''}`, { vars: { '--cols': String(cols) } });
-    for (const id of w.ids || []) {
-      const chip = chips.get(id);
-      if (!chip) continue;
-      used.add(id);
-      grid.append(chip);
-    }
+    const placed = (w.ids || []).filter((id) => chips.has(id)).map((id) => { used.add(id); return chips.get(id); });
+    const dimmable = (chip) => chip.classList.contains('dimmable');
+    grid.append(...placed.filter(dimmable), ...placed.filter((chip) => !dimmable(chip)));
     return { el: grid };
   }
 

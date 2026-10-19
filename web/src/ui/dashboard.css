@@ -28,6 +28,9 @@
 .dash-lights { display: grid; grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr)); gap: 8px; }
 .dash .tile { height: 56px; border-radius: 18px; padding: 0 10px; gap: 9px; animation: none; }
 .dash .tile .bubble { width: 34px; height: 34px; border-radius: 12px; }
+/* A dimmable light: a row of its own, its settings button in line. */
+.dash-lights > .tile.dimmable { grid-column: 1 / -1; }
+.dash-lights > .tile.dimmable .tile-more { position: static; background: none; }
 /* A plan AC placed the same way ("ids": ["<ac id>"]): drawn like the cards beside it, its
    temperature and power button at their size. A click opens its sheet. */
 .dash .tile.ac { gap: 7px; }
@@ -348,9 +351,9 @@ html.ios .dash .tile.ac { height: 60px; }
   html.ios .card.has-dash.no-model { --stage-h: calc(var(--safe-top) + 140px); }
   /* Three lights to a row: the icon above the name, like the Home app's tiles, so the name has the
      tile's whole width. */
-  html.ios .dash .dash-lights.many .tile { flex-direction: column; align-items: flex-start; justify-content: center; height: auto; padding: 11px 10px; gap: 8px; }
-  html.ios .dash .dash-lights.many .tile-text { width: 100%; }
-  html.ios .dash .dash-lights.many .tile-name { font-size: 13px; }
+  html.ios .dash .dash-lights.many .tile:not(.dimmable) { flex-direction: column; align-items: flex-start; justify-content: center; height: auto; padding: 11px 10px; gap: 8px; }
+  html.ios .dash .dash-lights.many .tile:not(.dimmable) .tile-text { width: 100%; }
+  html.ios .dash .dash-lights.many .tile:not(.dimmable) .tile-name { font-size: 13px; }
   /* Two cards to a row: their status may take two lines (the AC's mode, fan and room temperature). */
   html.ios .dash-sec-grid > .chip.dash-card:not(.wide) .chip-sub { white-space: normal; }
   /* A computer showing CPU and GPU has no room for them beside its buttons: the buttons drop
