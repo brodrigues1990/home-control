@@ -285,20 +285,67 @@ const builders = {
     return group(at(cyl(0.2, 0.22, 0.03, m, 24), 0, 0, 0), at(cyl(0.015, 0.015, 1.1, m, 10), 0, 0, 0), head);
   },
 
-  // A robot vacuum on the floor: a low white disc with a lidar turret. `entity` (its vacuum):
-  //  - on its dock (docked, idle, paused...): connected, Wi-Fi arcs rise from it;
-  //  - out cleaning or returning: it is away from here, so it is drawn ghosted with a tag;
+  // A robot vacuum and its dock (at `pos`): a low white disc with a lidar turret, its front (+x) behind a
+  // dark bumper. `entity` (its vacuum):
+  //  - docked, idle, paused...: connected, Wi-Fi arcs rise from it; the dock's light breathes while it charges;
+  //  - cleaning: it drives where it is, side brushes spinning in a ring of light; returning: the ring, dimmer;
   //  - unavailable: not connected, an orange "off" badge floats over it.
-  // Where it is right now comes from `position` (Xiaomi Home) or `map` (Dreame Vacuum's map camera).
+  // Where it is right now comes from `position` (Xiaomi Home) or `map` (Dreame Vacuum's map camera); without
+  // either it stays on its dock, drawn ghosted with a tag while it is out working.
   robotVacuum({ entity = null, color = '#7dd3fc', position = null, origin = [0, 0], map = null, mapScale = 1, pos: home = [0, 0] }) {
     const body = (c, o = {}) => new THREE.MeshStandardMaterial({ color: c, roughness: o.rough ?? 0.4, transparent: true, opacity: 1, ...o });
-    const mats = [body('#e9eaee', { rough: 0.35 }), body('#1c1d22'), body('#2b2d34')];
+    const lamp = (o = {}) => new THREE.MeshStandardMaterial({ color: '#0d1117', emissive: new THREE.Color(color), emissiveIntensity: 0, roughness: 0.3, ...o });
+    const led = lamp({ transparent: true });
+    const mats = [body('#e9eaee', { rough: 0.35 }), body('#1c1d22'), body('#2b2d34'), led];
+    const bumper = new THREE.CylinderGeometry(0.173, 0.173, 0.05, 24, 1, true, 0, Math.PI); // the front half
+    bumper.translate(0, 0.025, 0);
+    // a side brush under the front edge: three bristles about a hub
+    const brush = (side) => at(group(
+      at(cyl(0.012, 0.012, 0.006, mats[2], 10), 0, 0, 0),
+      [0, 1, 2].map((i) => {
+        const arm = group(at(box(0.075, 0.002, 0.005, mats[1], { r: 0 }), 0.04, 0.001, 0));
+        arm.rotation.y = (i * Math.PI * 2) / 3;
+        return arm;
+      }),
+    ), 0.11, 0.002, side * 0.1);
+    const brushes = [brush(-1), brush(1)]; // left, right
+    // a flat disc on the floor, painted as a radial gradient: the robot's shade, its ring of light
+    const floorDisc = (size, stops, o = {}) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = 128;
+      const ctx = canvas.getContext('2d');
+      const gradient = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+      for (const [stop, c] of stops) gradient.addColorStop(stop, c);
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, 128, 128);
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      const disc = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthWrite: false, ...o }));
+      disc.rotation.x = -Math.PI / 2;
+      return disc;
+    };
+    const shade = at(floorDisc(0.46, [[0, 'rgba(0,0,0,0.5)'], [0.62, 'rgba(0,0,0,0.32)'], [1, 'rgba(0,0,0,0)']]), 0, 0.002, 0);
+    const glow = at(floorDisc(0.72, [[0, 'rgba(255,255,255,0)'], [0.46, 'rgba(255,255,255,0)'], [0.56, 'rgba(255,255,255,0.9)'], [1, 'rgba(255,255,255,0)']],
+      { color: new THREE.Color(color).multiplyScalar(1.4), blending: THREE.AdditiveBlending, toneMapped: false, opacity: 0 }), 0, 0.004, 0);
     const body3 = group(
+      shade, glow,
       at(cyl(0.17, 0.17, 0.08, mats[0], 36), 0, 0.005, 0),
+      at(new THREE.Mesh(bumper, mats[1]), 0, 0.02, 0),
       at(cyl(0.12, 0.12, 0.004, mats[1], 28), 0, 0.085, 0),
-      at(cyl(0.04, 0.04, 0.03, mats[2], 18), 0.03, 0.085, -0.02),
+      at(cyl(0.04, 0.04, 0.03, mats[2], 18), 0.04, 0.085, 0),
+      at(cyl(0.012, 0.012, 0.004, led, 12), -0.07, 0.087, 0),
+      brushes,
     );
-    const g = group(body3);
+    // It drives about, so it stays out of the shadow map (drawn once): its shade goes with it instead.
+    body3.traverse((o) => { o.userData.noShadow = true; });
+    // The dock, behind the robot as it rests: a ramp and a back with a light. It faces the way the map's charger does.
+    const dockLed = lamp();
+    const dock = group(
+      at(box(0.17, 0.01, 0.3, mat('#1f2126', { rough: 0.6 }), { r: 0.004 }), -0.12, 0, 0),
+      at(box(0.09, 0.13, 0.3, mat('#2b2d34', { rough: 0.45 }), { r: 0.03 }), -0.215, 0, 0),
+      at(box(0.006, 0.012, 0.06, dockLed, { r: 0 }), -0.168, 0.1, 0),
+    );
+    const g = group(dock, body3);
     const drive = body3; // moves with the robot's live position; the sprites follow it
     const glyph = (draw, tint, size) => {
       const canvas = document.createElement('canvas');
@@ -335,8 +382,11 @@ const builders = {
       ctx.beginPath(); ctx.arc(64, 96, 8, 0, Math.PI * 2); ctx.fill();
       ctx.beginPath(); ctx.moveTo(24, 28); ctx.lineTo(104, 108); ctx.stroke();
     }, '#ff9a2e', 0.34);
-    let mode = 'docked'; // docked | away | offline
+    let mode = 'docked'; // docked | cleaning | returning | offline
+    let charging = false;
     let ghost = 0;
+    let spin = 0;
+    let lit = 0;
     let clock = 0;
     const target = { x: 0, z: 0, yaw: null };
     const here = { x: 0, z: 0, yaw: 0 };
@@ -364,10 +414,14 @@ const builders = {
           // degrees. The dock is at `pos` and `rot` turns the robot's map about it; `mapScale` stretches the
           // robot's metres onto a plan not drawn quite to size.
           const { vacuum_position: v, charger_position: c } = get(map)?.attributes || {};
-          if (v && c) aim(((v.x - c.x) / 1000) * mapScale, (-(v.y - c.y) / 1000) * mapScale, THREE.MathUtils.degToRad(v.a));
+          if (v && c) {
+            aim(((v.x - c.x) / 1000) * mapScale, (-(v.y - c.y) / 1000) * mapScale, THREE.MathUtils.degToRad(v.a));
+            dock.rotation.y = THREE.MathUtils.degToRad(c.a ?? 0); // the way a robot on it faces
+          }
         }
         const state = String(get(entity)?.state ?? 'unavailable');
-        mode = ['unavailable', 'unknown', ''].includes(state) ? 'offline' : ['cleaning', 'returning'].includes(state) ? 'away' : 'docked';
+        mode = ['unavailable', 'unknown', ''].includes(state) ? 'offline' : ['cleaning', 'returning'].includes(state) ? state : 'docked';
+        charging = state === 'docked';
       },
       update(dt) {
         clock += dt;
@@ -382,10 +436,23 @@ const builders = {
         }
         drive.position.set(here.x, 0, here.z);
         drive.rotation.y = here.yaw;
-        const goal = mode === 'away' ? 1 : 0;
+        const out = mode === 'cleaning' || mode === 'returning';
+        // ghosted only while it is out and nothing says where: it is not where it is drawn
+        const goal = out && target.yaw == null ? 1 : 0;
         ghost += (goal - ghost) * Math.min(1, dt * 3);
         if (Math.abs(goal - ghost) < 0.004) ghost = goal;
         for (const m of mats) m.opacity = 1 - 0.78 * ghost;
+        shade.material.opacity = 1 - ghost;
+        // at work: the side brushes spin (the right one the other way) inside a breathing ring of light
+        spin += ((mode === 'cleaning' && !goal ? 16 : 0) - spin) * Math.min(1, dt * 2);
+        brushes[0].rotation.y += spin * dt;
+        brushes[1].rotation.y -= spin * dt;
+        const ring = out && !goal ? (mode === 'cleaning' ? 0.7 + 0.2 * Math.sin(clock * 3) : 0.35) : 0;
+        lit += (ring - lit) * Math.min(1, dt * 3);
+        glow.material.opacity = lit;
+        glow.visible = lit > 0.01;
+        led.emissiveIntensity = out ? 2.2 : 0.25;
+        dockLed.emissiveIntensity = charging ? 1.2 + 0.5 * Math.sin(clock * 1.6) : 0.1;
         tag.visible = ghost > 0.02;
         tag.position.set(0, 0.3 + Math.sin(clock * 2) * 0.015, 0);
         tag.material.opacity = ghost;
@@ -613,7 +680,7 @@ export function buildFurniture(items) {
     g.rotation.y = THREE.MathUtils.degToRad(item.rot || 0);
     const flat = g.userData.flat;
     g.traverse((o) => {
-      if (o.isMesh) { o.castShadow = !flat; o.receiveShadow = true; }
+      if (o.isMesh) { o.castShadow = !flat && !o.userData.noShadow; o.receiveShadow = true; }
     });
     root.add(g);
     if (g.userData.live) live.push(g.userData.live);

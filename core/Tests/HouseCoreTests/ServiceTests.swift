@@ -92,6 +92,21 @@ final class ServiceTests: XCTestCase {
         ])
         XCTAssertEqual(range.ac?["mode"] as? String, "auto")
         XCTAssertEqual(range.ac?["target"] as? Double, 23)
+        // A Midea split: "low" is low (not "silent"), "full" its turbo, sleep and eco are presets.
+        let midea = HomeAssistantService.reading(from: [
+            "entity_id": "climate.quarto", "state": "cool",
+            "attributes": ["hvac_modes": ["off", "auto", "cool", "dry", "fan_only"], "temperature": 23,
+                           "fan_modes": ["silent", "low", "medium", "high", "full", "auto"], "fan_mode": "low",
+                           "swing_modes": ["off", "vertical", "horizontal", "both"], "swing_mode": "horizontal",
+                           "preset_modes": ["none", "comfort", "eco", "boost", "sleep", "away"], "preset_mode": "sleep"],
+        ])
+        XCTAssertEqual(midea.ac?["fan"] as? String, "low")
+        XCTAssertEqual(midea.ac?["swing"] as? String, "swing")
+        XCTAssertEqual(midea.ac?["sleep"] as? Bool, true)
+        XCTAssertEqual(midea.features?["fans"] as? [String], ["auto", "low", "medium", "high", "turbo"])
+        XCTAssertEqual(midea.features?["swing"] as? Bool, true)
+        XCTAssertEqual(FanNames.table(["silent", "low", "medium", "high", "full", "auto"]),
+                       ["auto": "auto", "low": "low", "medium": "medium", "high": "high", "turbo": "full"])
     }
 
     func testHomeAssistantBuildsServiceCalls() {
@@ -117,6 +132,14 @@ final class ServiceTests: XCTestCase {
         XCTAssertEqual(Set(change.map(\.service)), ["set_temperature", "set_fan_mode", "set_preset_mode"])
         XCTAssertEqual(HomeAssistantService.calls(for: "climate.x", patch: ["on": false], state: [:], fans: fans, modes: modes)
             .first?.data["hvac_mode"] as? String, "off")
+        // Swinging is "on" where the entity has it, else one of the directions it lists.
+        let swing = { (swings: [String]) in
+            HomeAssistantService.calls(for: "climate.x", patch: ["swing": "l2"], state: [:], fans: fans, modes: modes, swings: swings)
+                .first?.data["swing_mode"] as? String
+        }
+        XCTAssertEqual(swing(["off", "on"]), "on")
+        XCTAssertEqual(swing(["off", "vertical", "horizontal", "both"]), "vertical")
+        XCTAssertEqual(swing([]), "on")
     }
 
     func testHomeAssistantAddressIsNormalized() throws {
@@ -217,13 +240,14 @@ final class ServiceTests: XCTestCase {
         let fake = FakeService()
         let hub = DeviceHub(directory: dir, secret: { _ in MemorySecretStore() }, homeKit: fake)
         hub.setLinks(from: [
-            "lights": [["id": "lamp", "link": ["service": "homekit", "id": "L1"]], ["id": "sim"]],
+            "lights": [["id": "lamp", "link": ["service": "homekit", "id": "L1"]], ["id": "gone", "link": ["service": "homekit", "id": "L2"]],
+                       ["id": "sim"]],
             "acs": [["id": "ac", "link": ["service": "homekit", "id": "A1"], "sensor": ["service": "homekit", "id": "S1"]],
                     ["id": "ac2", "sensor": ["service": "homekit", "id": "S1"]]],
         ])
-        XCTAssertEqual(hub.linkedDeviceCount, 2)
+        XCTAssertEqual(hub.linkedDeviceCount, 3)
         XCTAssertTrue(hub.canPoll)
-        XCTAssertEqual(fake.watched, ["L1", "A1", "S1"])
+        XCTAssertEqual(fake.watched, ["L1", "L2", "A1", "S1"])
 
         let sent = expectation(description: "sent")
         hub.command(["id": "lamp", "kind": "light", "patch": ["on": true], "state": ["on": true]]) { reply in
@@ -243,7 +267,11 @@ final class ServiceTests: XCTestCase {
         await fulfillment(of: [refused], timeout: 2)
 
         let update = await hub.poll()
-        XCTAssertEqual((update?["lights"] as? [String: [String: Any]])?["lamp"]?["on"] as? Bool, true)
+        let lights = update?["lights"] as? [String: [String: Any]]
+        XCTAssertEqual(lights?["lamp"]?["on"] as? Bool, true)
+        XCTAssertEqual(lights?["lamp"]?["online"] as? Bool, true)
+        XCTAssertEqual(lights?["gone"]?["on"] as? Bool, false) // unreachable: off, not left as it was
+        XCTAssertEqual(lights?["gone"]?["online"] as? Bool, false)
         let acs = update?["acs"] as? [String: [String: Any]]
         XCTAssertEqual(acs?["ac"]?["target"] as? Double, 23)
         XCTAssertEqual(acs?["ac"]?["roomTemp"] as? Double, 19.5)  // from the sensor, not the unit
@@ -366,6 +394,7 @@ private final class FakeService: DeviceService {
     func read(_ ids: Set<String>) async throws -> [String: DeviceReading] {
         [
             "L1": DeviceReading(light: ["on": true, "brightness": 0.5]),
+            "L2": DeviceReading(online: false),
             "A1": DeviceReading(ac: ["on": true, "target": 23.0, "roomTemp": 26.0], features: ["modes": ["cool"]]),
             "S1": DeviceReading(temperature: 19.5),
         ].filter { ids.contains($0.key) }

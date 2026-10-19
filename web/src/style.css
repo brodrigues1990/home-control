@@ -376,6 +376,7 @@ html.native .card { width: auto; height: auto; box-shadow:
 }
 @media (hover: hover) { .tile:hover { background: var(--glass-hi); } }
 .tile.pressed { transform: scale(0.96); }
+.tile.gone { opacity: 0.55; } /* a lamp its platform cannot reach */
 .tile.on {
   background: linear-gradient(135deg, color-mix(in srgb, var(--c) 26%, transparent), color-mix(in srgb, var(--c) 8%, transparent));
   border-color: color-mix(in srgb, var(--c) 42%, transparent);
@@ -500,6 +501,14 @@ html.native .card { width: auto; height: auto; box-shadow:
 /* ---------- sheets ---------- */
 
 .sheet { padding: 0 20px 18px; }
+.sheet.scrolls {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 22px), transparent 100%);
+  mask-image: linear-gradient(180deg, #000 calc(100% - 22px), transparent 100%);
+}
+.sheet.scrolls::-webkit-scrollbar { display: none; }
 
 .sheet-head { display: flex; align-items: center; gap: 10px; flex: none; }
 .sheet-title { flex: 1; min-width: 0; }
@@ -594,6 +603,8 @@ html.native .card { width: auto; height: auto; box-shadow:
 .field-label + .slider-row { margin-top: 8px; }
 
 .options { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: auto; padding-top: 16px; flex: none; }
+/* Readings dashboard.json adds to a device (`devices.<id>.details`), under its controls. */
+.sheet-details { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 8px; flex: none; }
 .option {
   position: relative;
   height: 96px;

@@ -11,12 +11,14 @@ import { createLineChart, valueAt } from './linechart.js';
 
 const POLL_MS = 5000;
 const HISTORY_MS = 60000; // how often the charts read their hours of history again
+const STATS_MS = 300000; // how often a meter's use since the day or month began is read again
 const SERIES_COLORS = ['#3987e5', '#d95926', '#199e70']; // categorical slots 1-3, validated on the panel surface
 const NET_COLORS = { up: '#c98500', down: '#9085e9' };
 const POWER_COLOR = '#ffb46b'; // one series: magnitude in a single hue
 const BATTERY_COLOR = '#7f9cc9';
 const LOW_COLOR = '#e66767'; // critical; always with the word "low"
 const ASSUME_MS = 10000; // how long a change shown ahead of Home Assistant waits for it to agree
+const HOLD_MS = 180000; // ... or longer while what carries it out still runs (an AC's script waits for the unit)
 const OFF = ['off', 'unavailable', 'unknown', 'idle', 'standby', 'power_off', 'none', '0', ''];
 const AC_MODES = {
   auto: ['auto', 'Auto', MODE_COLORS.auto], cool: ['cool', 'Cool', MODE_COLORS.cool], save: ['leaf', 'Eco', '#5fe08a'],
@@ -25,6 +27,15 @@ const AC_MODES = {
 const FAN_LABEL = { auto: 'Fan auto', low: 'Fan low', med: 'Fan med', medium: 'Fan med', high: 'Fan high' };
 
 const num = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : null; };
+
+/** A glance item's reading as text (`unit` and `decimals` for a number, `strip` cuts part of it); "–" when missing. */
+export function formatReading(raw, item) {
+  if (raw == null || ['unknown', 'unavailable', ''].includes(raw)) return '–';
+  let text = String(raw);
+  if (item.strip) text = text.replace(new RegExp(item.strip), '');
+  if (item.unit) { const n = num(raw); if (n != null) text = `${n.toFixed(item.decimals ?? 0)} ${item.unit}`; }
+  return text;
+}
 const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1).replace(/_/g, ' ') : '');
 const next = (list, value) => list[(list.indexOf(value) + 1) % list.length];
 
@@ -38,8 +49,9 @@ const FROM_PLAN_FAN = { auto: 'auto', low: 'low', medium: 'med', high: 'high', t
  * `onStates(get)`: after each read, Home Assistant's states for the 3D model.
  * `onPlanAC(id, state, features)`: the real state of an AC of the plan that a dashboard
  * AC stands behind (`"plan": "<ac id>"`).
+ * `onOpen(id)`: opens the sheet of that AC of the plan (a click on the card that stands for it).
  */
-export function createDashboard(spec, { chips, onTab = () => {}, onStates = () => {}, onPlanAC = () => {}, menu = null }) {
+export function createDashboard(spec, { chips, onTab = () => {}, onStates = () => {}, onPlanAC = () => {}, onOpen = null, menu = null }) {
   const planACs = new Map(); // plan AC id -> (patch, current) => Promise: the panel's AC sheet, sent to the remote
   const ha = {}; // entity id -> { state, attributes, last_updated }
   const assumed = new Map(); // entity id -> { state?, attributes?, at }
@@ -57,10 +69,11 @@ export function createDashboard(spec, { chips, onTab = () => {}, onStates = () =
   const attr = (id, key) => (id ? view(id).attributes?.[key] : undefined);
 
   // Shows a change at once; Home Assistant's next newer report (or a timeout) replaces it.
-  function assume(id, patch) {
+  // `hold()`: true while the change is still being carried out, which keeps it past the timeout.
+  function assume(id, patch, hold = null) {
     if (!id) return;
     const before = assumed.get(id) || {};
-    assumed.set(id, { ...before, ...patch, attributes: { ...before.attributes, ...patch.attributes }, at: Date.now() });
+    assumed.set(id, { ...before, ...patch, attributes: { ...before.attributes, ...patch.attributes }, at: Date.now(), hold });
     render();
   }
 
@@ -82,7 +95,7 @@ export function createDashboard(spec, { chips, onTab = () => {}, onStates = () =
         const now = Date.now();
         for (const [id, a] of assumed) {
           const updated = Date.parse(ha[id]?.last_updated || '') || 0;
-          if (updated > a.at - 300 || now - a.at > ASSUME_MS) assumed.delete(id);
+          if (updated > a.at - 300 || now - a.at > (a.hold?.() ? HOLD_MS : ASSUME_MS)) assumed.delete(id);
         }
       } catch (error) {
         offline = error.message;
@@ -174,6 +187,11 @@ export function createDashboard(spec, { chips, onTab = () => {}, onStates = () =
   // ventilacao) and keeps its state in helpers: power, mode, fan and target.
   function ac(w) {
     const f = { power: 'ligado', mode: 'modo', target: 'temperatura', fan: 'ventilacao', sleep: 'sleep', ...(w.fields || {}) };
+    // The script can take a while (it waits for the unit, or switches its plug first): what was
+    // asked stays on show while it runs.
+    const guess = (id, value) => assume(id, { state: String(value) }, () => state(w.script) === 'on');
+    // What the remote offers: its helpers' options, when they list them.
+    const offered = (id, map, fallback) => [...new Set((attr(id, 'options') || fallback).map((o) => map[o]).filter(Boolean))];
     if (w.plan) {
       used.add(w.plan);
       // The AC of the 3D model and its sheet: what they change goes to the same script.
@@ -187,6 +205,11 @@ export function createDashboard(spec, { chips, onTab = () => {}, onStates = () =
         }
         if ('fan' in patch) variables[f.fan] = FROM_PLAN_FAN[patch.fan] || 'auto';
         if ('sleep' in patch && w.sleep) variables[f.sleep] = Boolean(patch.sleep);
+        if (f.power in variables) guess(w.power, variables[f.power] ? 'on' : 'off');
+        if (f.target in variables) guess(w.target, variables[f.target]);
+        if (f.mode in variables) guess(w.mode, variables[f.mode]);
+        if (f.fan in variables) guess(w.fan, variables[f.fan]);
+        if (f.sleep in variables) guess(w.sleep, variables[f.sleep] ? 'on' : 'off');
         if (!Object.keys(variables).length) return;
         await call('ha.call', { domain: 'script', service: 'turn_on', data: { entity_id: w.script, variables } });
         later(400);
@@ -198,19 +221,19 @@ export function createDashboard(spec, { chips, onTab = () => {}, onStates = () =
     const step = (d) => () => {
       const t = num(state(w.target)) ?? 24;
       const goal = Math.min(attr(w.target, 'max') ?? 30, Math.max(attr(w.target, 'min') ?? 16, t + d));
-      assume(w.target, { state: String(goal) });
+      guess(w.target, goal);
       sendTarget(goal);
     };
     const modeBtn = h('button.dash-opt', { title: 'Next mode', onclick: (e) => {
       e.stopPropagation();
       const m = next(attr(w.mode, 'options') || Object.keys(AC_MODES), state(w.mode));
-      assume(w.mode, { state: m });
+      guess(w.mode, m);
       send({ [f.mode]: m });
     } });
     const fanBtn = h('button.dash-opt', { title: 'Next fan speed', onclick: (e) => {
       e.stopPropagation();
       const s = next(attr(w.fan, 'options') || ['auto', 'low', 'med', 'high'], state(w.fan));
-      assume(w.fan, { state: s });
+      guess(w.fan, s);
       send({ [f.fan]: s });
     } });
     const value = h('span.chip-value');
@@ -218,10 +241,15 @@ export function createDashboard(spec, { chips, onTab = () => {}, onStates = () =
       button('minus', 'Cooler', step(-1)), value, button('plus', 'Warmer', step(1)),
       power(`${w.name} power`, () => {
         const on = state(w.power) === 'on';
-        assume(w.power, { state: on ? 'off' : 'on' });
+        guess(w.power, on ? 'off' : 'on');
         send({ [f.power]: !on });
       }));
     c.name.textContent = w.name || 'AC';
+    // Standing for an AC of the plan, a click opens its sheet: every mode, fan speed and the slider.
+    if (w.plan && onOpen) {
+      c.el.classList.add('opens');
+      c.el.addEventListener('click', () => onOpen(w.plan));
+    }
     return {
       el: c.el,
       update() {
@@ -237,12 +265,17 @@ export function createDashboard(spec, { chips, onTab = () => {}, onStates = () =
         const room = num(state(w.room));
         const watts = num(state(w.watts));
         c.el.title = watts != null ? `Drawing ${Math.round(watts)} W` : '';
-        c.setSub(on ? '' : 'Off · ', modeBtn, ' · ', fanBtn, room != null ? ` · ${room.toFixed(1)}° in` : '');
+        c.setSub(on ? '' : 'Off · ', modeBtn, ' · ', fanBtn, room != null ? ` · ${room.toFixed(1)}° in` : '',
+          on && watts != null ? ` · ${Math.round(watts)} W` : '');
         if (w.plan && ha[w.power]) {
           onPlanAC(w.plan, {
             on, target: t ?? 24, mode: TO_PLAN_MODE[state(w.mode)] || 'cool', eco: state(w.mode) === 'save',
             fan: TO_PLAN_FAN[state(w.fan)] || 'auto', ...(w.sleep ? { sleep: state(w.sleep) === 'on' } : {}),
-          }, { modes: ['cool', 'dry', 'fan', 'auto'], fans: ['auto', 'low', 'medium', 'high'], sleep: Boolean(w.sleep), eco: true, swing: false });
+          }, {
+            modes: offered(w.mode, TO_PLAN_MODE, ['cool', 'dry', 'fan', 'auto']),
+            fans: offered(w.fan, TO_PLAN_FAN, ['auto', 'low', 'med', 'high']),
+            sleep: Boolean(w.sleep), eco: (attr(w.mode, 'options') || ['save']).includes('save'), swing: false,
+          });
         }
       },
     };
@@ -617,6 +650,8 @@ export function createDashboard(spec, { chips, onTab = () => {}, onStates = () =
   // line (an attribute) and an online dot with its word.
   function glance(w) {
     const row = h('div.dash-glance');
+    const metered = (w.items || []).filter((item) => item.since);
+    const use = metered.length ? meterUse(metered) : null;
     const items = (w.items || []).map((item) => {
       const value = h('div.glance-value');
       const detail = h('div.glance-detail');
@@ -631,11 +666,7 @@ export function createDashboard(spec, { chips, onTab = () => {}, onStates = () =
       } }, icon('copy', 13, 2.2)) : null;
       row.append(h('div.glance', h('div.glance-label', item.name), h('div.glance-line', value, copy), h('div.glance-sub', dot, detail)));
       return () => {
-        const raw = state(item.entity);
-        const missing = raw == null || ['unknown', 'unavailable', ''].includes(raw);
-        let text = missing ? '–' : String(raw);
-        if (!missing && item.strip) text = text.replace(new RegExp(item.strip), '');
-        if (!missing && item.unit) { const n = num(raw); text = n != null ? `${n.toFixed(item.decimals ?? 0)} ${item.unit}` : text; }
+        const text = formatReading(item.since ? use.value(item) : state(item.entity), item);
         value.textContent = text;
         value.title = text;
         if (item.status) {
@@ -649,7 +680,42 @@ export function createDashboard(spec, { chips, onTab = () => {}, onStates = () =
         detail.title = detail.textContent;
       };
     });
-    return { el: row, update() { items.forEach((fn) => fn()); } };
+    const update = () => items.forEach((fn) => fn());
+    // Items with `since` read their meter's statistics while the tab shows, like the charts.
+    return { el: row, update, ...(use && { history: use, draw: update }) };
+  }
+
+  // A meter's use since the day or the month began (`since`), from Home Assistant's long-term
+  // statistics of the meter (`entity`, a total_increasing sensor such as kWh), which it keeps for
+  // good: the change over the full hours they hold, plus what the live reading has added since.
+  function meterUse(items) {
+    const ids = [...new Set(items.map((i) => i.entity))];
+    const rows = {}; // entity id -> [[start ms, change, state]], hour by hour
+    let loadedAt = 0;
+    const startOf = (since) => { const d = new Date(); d.setHours(0, 0, 0, 0); if (since === 'month') d.setDate(1); return d.getTime(); };
+    return {
+      // Again every few minutes, and as soon as a new day begins.
+      get stale() { return Date.now() - loadedAt > STATS_MS || new Date(loadedAt).toDateString() !== new Date().toDateString(); },
+      async load() {
+        loadedAt = Date.now();
+        try {
+          // From the hour before the earliest start: its reading is where the first period starts.
+          const since = Math.min(...items.map((i) => startOf(i.since))) - 3600000;
+          const { statistics } = await call('ha.statistics', { ids, since });
+          for (const id of ids) rows[id] = statistics[id] || [];
+        } catch { loadedAt = 0; }
+      },
+      value(item) {
+        const hours = rows[item.entity];
+        if (!hours?.length) return null;
+        const from = startOf(item.since);
+        const change = hours.reduce((sum, [start, delta]) => (start >= from ? sum + delta : sum), 0);
+        const last = hours[hours.length - 1][2];
+        const live = num(state(item.entity));
+        // A meter that started over since the last full hour counts from zero.
+        return change + (live == null ? 0 : live >= last ? live - last : live);
+      },
+    };
   }
 
   // Reads a widget's hours of history now and then; between reads the live readings extend it.

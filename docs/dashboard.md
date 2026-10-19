@@ -21,23 +21,26 @@ Use **Reload** in the menu (or relaunch) after editing it. Ported from a friend'
 
 The top level holds `panel {width, height}`, `watch` (extra entities the 3D model needs,
 for example `sun.sun`, `sensor.office_vent_status`, the C2, and
-`binary_sensor.pc_gamer_online`) and `tabs: [{title, model?, sections: [{title,
-temperature?, widgets: [...]}]}]`.
+`binary_sensor.pc_gamer_online`), `tabs: [{title, model?, sections: [{title,
+temperature?, widgets: [...]}]}]` and `devices` (extras for the plan's own devices, by their ids in the plan).
+
+`devices: {"<plan AC id>": {watts, details}}`: an AC's card keeps to power, temperature and `watts` (the sensor
+of its draw, shown while it runs); `details` (`glance` items) are listed in its sheet, under its controls.
 
 Widget types:
 
 | type | fields |
 | --- | --- |
 | `fan` | `status`, `watts`, scripts `on`, `off`, `plus`, `minus`, `reverse` |
-| `ac` | `script` (fields `ligado`, `modo`, `temperatura`, `ventilacao`, `sleep`), helpers `power`, `mode`, `fan`, `target`, `sleep`; `room`, `watts`; `plan` (id of the plan AC it stands behind) |
+| `ac` | `script` (fields `ligado`, `modo`, `temperatura`, `ventilacao`, `sleep`), helpers `power`, `mode`, `fan`, `target`, `sleep`; `room`, `watts`; `plan` (id of the plan AC it stands behind: a click on the card opens its sheet, offering the modes and fan speeds the helpers list) |
 | `media` | `entity` (Music Assistant player), optional `favorite {press (button), state (binary_sensor)}` heart |
 | `tv` | `entity`, `screen` (switch), optional `sources` labels, `hideSources`, `playPause` |
 | `toggle` | `name`, `icon`, `entity` (switch), `watts` (sensor): on/off with its draw |
 | `actions` | `script`, shared `variables`, `items[{label, icon?, variables, script?}]`: a row of one-tap script chips |
 | `washer` | `script` (+ `fields.action`, verbs iniciar/pausar/acordar/desligar), `status`, `remaining`, `remoteStart`, `course` (select, picked from a pop-up menu), `delay` (number, the delayed end in h), `cycles`, `tubClean`, `energyToday`, `energyMonth`, `labels` |
 | `status` | `items[{name, icon, entity, off[], labels{}, above, unit, remaining, battery, color}]` (`battery`: a % sensor shown beside the state) |
-| `lights` | `ids` (plan light ids), `columns` |
-| `glance` | `items[{name, entity, copy, detail (attribute), strip (regex), status, unit, decimals, note}]` |
+| `lights` | `ids` (plan light ids, or an AC's: its card with power and temperature, a click opens all its controls), `columns` |
+| `glance` | `items[{name, entity, copy, detail (attribute), strip (regex), status, unit, decimals, note, since}]` (`since`: `day` or `month`, with a meter as `entity`, such as the whole-home kWh total: its use since the day or month began, from Home Assistant's long-term statistics) |
 | `chart` | `series[{name, entity}]`, `hours`, `unit`, `max` |
 | `net` | `up`, `down`, `unit`, `hours` |
 | `links` | `items[{name, url, status, above, onDemand}]`, `columns` |

@@ -119,10 +119,12 @@ export function createStore(config) {
     store.onDeviceError?.(id, error.message);
   }
 
-  function sanitizeLight(id, patch) {
+  function sanitizeLight(id, patch, remote) {
     const caps = lightCfg.get(id).capabilities;
     const out = {};
     if ('on' in patch) out.on = Boolean(patch.on);
+    // Only the device itself (or another view of it) can say it is out of reach.
+    if (remote && 'online' in patch) out.online = patch.online !== false;
     if ('brightness' in patch && caps.includes('brightness')) out.brightness = clamp(patch.brightness, 0.05, 1);
     if ('temp' in patch && caps.includes('temp')) { out.temp = clamp(patch.temp, 2200, 6500); out.color = null; }
     if ('color' in patch && caps.includes('color')) out.color = patch.color;
@@ -132,7 +134,7 @@ export function createStore(config) {
   function writeLight(id, patch, { remote = false } = {}) {
     const cur = state.lights[id];
     if (!cur) return false;
-    const clean = sanitizeLight(id, patch);
+    const clean = sanitizeLight(id, patch, remote);
     // Only what actually changed is worth sending to the device.
     const diff = Object.fromEntries(Object.entries(clean).filter(([k, v]) => cur[k] !== v));
     if (!Object.keys(diff).length) return false;

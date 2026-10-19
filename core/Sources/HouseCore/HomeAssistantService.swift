@@ -22,9 +22,10 @@ public final class HomeAssistantService: DeviceService {
     private let session: URLSession
     private var socket: URLSessionWebSocketTask?
     private var socketRetry: Task<Void, Never>?
-    /// Each climate entity's own names for the panel's fan speeds and modes, from the last read.
+    /// Each climate entity's own names for the panel's fan speeds, modes and swing, from the last read.
     private var fanNames: [String: [String: String]] = [:]
     private var modeNames: [String: [String: String]] = [:]
+    private var swingNames: [String: [String]] = [:]
     /// The entities linked in the plan: only their changes are worth a read.
     private var watched: Set<String> = []
     private var changePending = false
@@ -175,6 +176,7 @@ public final class HomeAssistantService: DeviceService {
             if id.hasPrefix("climate.") {
                 fanNames[id] = FanNames.table(attributes["fan_modes"] as? [String] ?? [])
                 modeNames[id] = Self.modeTable(attributes["hvac_modes"] as? [String] ?? [])
+                swingNames[id] = attributes["swing_modes"] as? [String] ?? []
             }
             out[id] = Self.reading(from: state)
         }
@@ -221,6 +223,25 @@ public final class HomeAssistantService: DeviceService {
         return out
     }
 
+    /// The long-term statistics of each of `ids` from `start` on, hour by hour:
+    /// `[[epoch ms, change, state]]`, oldest first. Home Assistant keeps them for good, where the
+    /// state history behind `history` is purged after days; only sensors with a state class have them.
+    public func statistics(_ ids: Set<String>, since start: Date) async throws -> [String: [[Double]]] {
+        let wanted = ids.subtracting(Self.blockedEntities()).sorted()
+        guard !wanted.isEmpty else { return [:] }
+        let result = try await socketRequest([
+            "type": "recorder/statistics_during_period", "start_time": ISO8601DateFormatter().string(from: start),
+            "statistic_ids": wanted, "period": "hour", "types": ["change", "state"],
+        ]) as? [String: [[String: Any]]] ?? [:]
+        return result.mapValues { rows in
+            rows.compactMap { row in
+                guard let start = row["start"] as? Double, let change = row["change"] as? Double,
+                      let state = row["state"] as? Double else { return nil }
+                return [start, change, state]
+            }
+        }
+    }
+
     /// The state of one entity (nil when unknown or blocked).
     public func state(of id: String) async throws -> String? {
         guard !Self.blockedEntities().contains(id) else { return nil }
@@ -241,7 +262,7 @@ public final class HomeAssistantService: DeviceService {
             throw ServiceFailure("\(id) is blocked in homeassistant-blocked.json")
         }
         for call in Self.calls(for: id, patch: patch, state: state,
-                               fans: fanNames[id] ?? [:], modes: modeNames[id] ?? [:]) {
+                               fans: fanNames[id] ?? [:], modes: modeNames[id] ?? [:], swings: swingNames[id] ?? []) {
             _ = try await request("POST", "/api/services/\(call.domain)/\(call.service)", body: call.data)
         }
     }
@@ -335,7 +356,8 @@ public final class HomeAssistantService: DeviceService {
             }
             if let room = attributes.double("current_temperature") { ac["roomTemp"] = room }
             let fans = FanNames.table(attributes["fan_modes"] as? [String] ?? [])
-            if let current = attributes["fan_mode"] as? String, let fan = FanNames.panel(current), fans[fan] != nil { ac["fan"] = fan }
+            if let current = attributes["fan_mode"] as? String,
+               let fan = fans.first(where: { $0.value == current })?.key ?? FanNames.panel(current), fans[fan] != nil { ac["fan"] = fan }
             let swings = attributes["swing_modes"] as? [String] ?? []
             if let swing = attributes["swing_mode"] as? String, !swings.isEmpty { ac["swing"] = swing == "off" ? "off" : "swing" }
             let presets = attributes["preset_modes"] as? [String] ?? []
@@ -361,8 +383,14 @@ public final class HomeAssistantService: DeviceService {
         var data: [String: Any]
     }
 
+    /// The entity's name for "swinging": "on" where it has one, else one of its directions
+    /// (a Midea split lists only off, vertical, horizontal and both).
+    static func swingOn(_ swingModes: [String]) -> String {
+        ["on", "vertical", "both"].first(where: swingModes.contains) ?? swingModes.first { $0 != "off" } ?? "on"
+    }
+
     static func calls(for id: String, patch: [String: Any], state: [String: Any],
-                      fans: [String: String], modes: [String: String]) -> [Call] {
+                      fans: [String: String], modes: [String: String], swings: [String] = []) -> [Call] {
         let domain = id.split(separator: ".").first.map(String.init) ?? ""
         let target: [String: Any] = ["entity_id": id]
         func call(_ service: String, _ data: [String: Any] = [:], domain d: String = domain) -> Call {
@@ -401,7 +429,7 @@ public final class HomeAssistantService: DeviceService {
             out.append(call("set_fan_mode", ["fan_mode": name]))
         }
         if let swing = patch["swing"] as? String {
-            out.append(call("set_swing_mode", ["swing_mode": swing == "off" ? "off" : "on"]))
+            out.append(call("set_swing_mode", ["swing_mode": swing == "off" ? "off" : swingOn(swings)]))
         }
         for preset in ["sleep", "eco"] {
             if let enabled = patch[preset] as? Bool {
@@ -443,6 +471,44 @@ public final class HomeAssistantService: DeviceService {
         }
         if raw { return String(data: data, encoding: .utf8) }
         return data.isEmpty ? nil : try? JSONSerialization.jsonObject(with: data)
+    }
+
+    /// One command of the WebSocket API, for what the REST API lacks (statistics), on a socket of
+    /// its own: connect, authenticate, ask, close. Its `result`.
+    private func socketRequest(_ command: [String: Any]) async throws -> Any? {
+        guard let config, var parts = URLComponents(string: config.url + "/api/websocket") else {
+            throw ServiceFailure("Connect Home Assistant first")
+        }
+        parts.scheme = parts.scheme == "https" ? "wss" : "ws"
+        guard let url = parts.url else { throw ServiceFailure("Connect Home Assistant first") }
+        let task = session.webSocketTask(with: url)
+        task.resume()
+        defer { task.cancel(with: .normalClosure, reason: nil) }
+        func receive() async throws -> [String: Any] {
+            guard case .string(let text) = try await task.receive() else { return [:] }
+            return (try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any]) ?? [:]
+        }
+        do {
+            _ = try await receive() // auth_required
+            try await task.send(.string(Self.json(["type": "auth", "access_token": config.token])))
+            guard try await receive()["type"] as? String == "auth_ok" else {
+                throw ServiceFailure("Home Assistant refused the token. Create a new long-lived access token and connect again.")
+            }
+            var message = command
+            message["id"] = 1
+            try await task.send(.string(Self.json(message)))
+            while true {
+                let reply = try await receive()
+                guard reply["id"] as? Int == 1 else { continue }
+                if reply["success"] as? Bool == true { return reply["result"] }
+                let reason = (reply["error"] as? [String: Any])?["message"] as? String ?? "failed"
+                throw ServiceFailure("Home Assistant: \(command["type"] ?? "") \(reason)")
+            }
+        } catch let failure as ServiceFailure {
+            throw failure
+        } catch {
+            throw ServiceFailure("Home Assistant at \(config.url) did not answer: \(error.localizedDescription)")
+        }
     }
 
     // MARK: - Live updates

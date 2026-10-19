@@ -189,7 +189,7 @@ public enum ColorMath {
 enum FanNames {
     static func panel(_ name: String) -> String? {
         let n = name.lowercased()
-        if ["turbo", "max", "strong", "highest", "powerful", "boost", "very high"].contains(where: n.contains) { return "turbo" }
+        if ["turbo", "max", "strong", "highest", "powerful", "boost", "very high", "full"].contains(where: n.contains) { return "turbo" }
         if n.contains("high") { return "high" }
         if n.contains("med") || n.contains("mid") { return "medium" }
         if n.contains("low") || n.contains("quiet") || n.contains("silent") { return "low" }
@@ -197,9 +197,11 @@ enum FanNames {
         return nil
     }
 
-    /// For each panel fan speed, the platform's own name for it (the first one that maps).
+    /// For each panel fan speed, the platform's own name for it: the one spelled the same, else
+    /// the first one that maps ("silent, low, medium…" keeps "low" for low, not "silent").
     static func table(_ names: [String]) -> [String: String] {
         var out: [String: String] = [:]
+        for name in names where order.contains(name.lowercased()) { out[name.lowercased()] = name }
         for name in names where name.lowercased() != "off" {
             if let p = panel(name), out[p] == nil { out[p] = name }
         }

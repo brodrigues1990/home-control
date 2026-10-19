@@ -458,6 +458,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     host.reply(to: message, ["error": error.localizedDescription])
                 }
             }
+        case "ha.statistics":
+            // A meter's hours since the month began, at most.
+            let ids = Set(message["ids"] as? [String] ?? []).intersection(dashboard?.entities ?? [])
+            let since = Date(timeIntervalSince1970: (message["since"] as? Double ?? 0) / 1000)
+            let start = max(since, Date().addingTimeInterval(-40 * 86400))
+            Task { @MainActor in
+                do {
+                    host.reply(to: message, ["statistics": try await hub.homeAssistant.statistics(ids, since: start)])
+                } catch {
+                    host.reply(to: message, ["error": error.localizedDescription])
+                }
+            }
         case "dashboard.open":
             // Only the links dashboard.json lists, in the default browser.
             if let text = message["url"] as? String, dashboard?.urls.contains(text) == true, let url = URL(string: text) {

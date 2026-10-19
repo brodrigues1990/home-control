@@ -1,8 +1,10 @@
 /* The panel's dashboard (dashboard.json): sections of Home Assistant controls and the plan's
-   lights, in place of the scenes, room filter and device grid. */
+   lights, in place of the scenes and device grid. The room filter and the "All on / All off"
+   row stay, as on the iPhone. */
 
 .card.has-dash { --stage-h: 430px; }
-.card.has-dash .scenes, .card.has-dash .list-head { display: none; }
+.card.has-dash .scenes { display: none; }
+.card.has-dash .list-head { margin-bottom: 0; }
 .card.has-dash .devices { padding-top: 10px; }
 
 .dash { display: flex; flex-direction: column; gap: 14px; }
@@ -26,6 +28,15 @@
 .dash-lights { display: grid; grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr)); gap: 8px; }
 .dash .tile { height: 56px; border-radius: 18px; padding: 0 10px; gap: 9px; animation: none; }
 .dash .tile .bubble { width: 34px; height: 34px; border-radius: 12px; }
+/* A plan AC placed the same way ("ids": ["<ac id>"]): drawn like the cards beside it, its
+   temperature and power button at their size. A click opens its sheet. */
+.dash .tile.ac { gap: 7px; }
+.dash .tile.ac .stepper button { border-radius: 9px; }
+.dash .tile.ac .stepper .value { min-width: 32px; font-size: 15px; }
+.dash .tile.ac .mini-power { width: 28px; height: 28px; margin-left: 2px; background: rgba(255, 255, 255, 0.1); }
+.dash .tile.ac .mini-power .icon { width: 13px; height: 13px; }
+.dash .tile.ac.on .mini-power { box-shadow: 0 0 14px -4px var(--c); }
+html.ios .dash .tile.ac { height: 60px; }
 
 /* ---------- control cards ---------- */
 
@@ -48,6 +59,8 @@
   box-shadow: 0 12px 26px -16px var(--c);
 }
 .dash .chip.fail { border-color: rgba(255, 90, 79, 0.6); }
+.dash .chip.opens { cursor: pointer; } /* an AC of the plan: a click opens its sheet */
+@media (hover: hover) { .dash .chip.opens:not(.on):hover { background: var(--glass-hi); } }
 .dash .chip-bubble {
   flex: none; width: 34px; height: 34px; border-radius: 12px;
   display: grid; place-items: center;

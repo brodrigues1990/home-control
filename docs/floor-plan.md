@@ -126,6 +126,7 @@ Decoration only. Every piece has `type`, `pos` (`[x, z]` of its centre) and an o
 | `curtains` | `width`, `height`, `color` |
 | `ceilingFan` | `ceiling` (height), `color` |
 | `floorFan` | `color` |
+| `robotVacuum` | `entity` (its vacuum in Home Assistant), and where it is: `map` (Dreame Vacuum's map camera, with `mapScale`) or `position` + `origin` (Xiaomi Home); `color`. `pos` is its dock, `rot` turns the robot's map about it |
 | `nightstand`, `bathtub`, `toilet`, `washer` | — |
 
 ## `lights`

@@ -7,7 +7,7 @@ import { lightColor } from '../three/lights.js';
 import { MODE_COLORS } from '../three/ac.js';
 import { AC_SWINGS } from '../store.js';
 import { haptic, isPhone, post } from '../bridge.js';
-import { createDashboard } from './dashboard.js';
+import { createDashboard, formatReading } from './dashboard.js';
 
 const MODE_LABEL = { cool: 'Cool', heat: 'Heat', dry: 'Dry', fan: 'Fan', auto: 'Auto' };
 const FAN_LABEL = { auto: 'Auto', low: 'Low', medium: 'Medium', high: 'High', turbo: 'Turbo' };
@@ -23,6 +23,7 @@ const tmp = new THREE.Color();
 const css = (c) => `#${c.getHexString()}`;
 
 function lightStatus(cfg, s) {
+  if (s.online === false) return 'Offline';
   if (!s.on) return 'Off';
   return cfg.capabilities.includes('brightness') ? `${Math.round(s.brightness * 100)}%` : 'On';
 }
@@ -200,6 +201,7 @@ export function createPanel(root, config, store, { onFocus, onMenu, onModel = ()
       update() {
         const s = state.lights[cfg.id];
         el.classList.toggle('on', s.on);
+        el.classList.toggle('gone', s.online === false); // unavailable: switched off at the wall, or off the network
         el.style.setProperty('--c', css(lightColor(s, tmp)));
         el.style.setProperty('--level', s.on ? String(s.brightness) : '0');
         // On a phone the group heading above the tile already names the room.
@@ -236,7 +238,14 @@ export function createPanel(root, config, store, { onFocus, onMenu, onModel = ()
         el.style.setProperty('--c', MODE_COLORS[s.mode]);
         if (shownMode !== s.mode) { bubble.replaceChildren(icon(s.mode, 19)); shownMode = s.mode; }
         value.textContent = `${s.target}°`;
-        sub.textContent = `${s.on ? MODE_LABEL[s.mode] : 'Off'} · Room ${s.roomTemp.toFixed(isPhone ? 0 : 1)}°`;
+        if (dash) {
+          // On a dashboard the card keeps to power, temperature and what it draws; the room's
+          // temperature and the rest are in its sheet.
+          const watts = parseFloat(live(extras(cfg.id).watts));
+          sub.textContent = s.on ? [MODE_LABEL[s.mode], Number.isFinite(watts) ? `${Math.round(watts)} W` : null].filter(Boolean).join(' · ') : 'Off';
+        } else {
+          sub.textContent = `${s.on ? MODE_LABEL[s.mode] : 'Off'} · Room ${s.roomTemp.toFixed(isPhone ? 0 : 1)}°`;
+        }
       },
     };
   }
@@ -245,6 +254,10 @@ export function createPanel(root, config, store, { onFocus, onMenu, onModel = ()
   for (const cfg of config.lights) tiles.set(cfg.id, lightTile(cfg));
 
   const dashSpec = window.__HOUSE_BOOT__?.dashboard;
+  // What dashboard.json adds to a device of the plan (`devices.<id>`): `watts`, the draw its card
+  // shows, and `details`, readings its sheet lists (glance items).
+  const extras = (id) => dashSpec?.devices?.[id] || {};
+  const live = (entity) => (entity ? liveStates?.(entity)?.state : undefined);
   if (dashSpec?.sections?.length || dashSpec?.tabs?.length) {
     // A tab with `"model": false` (NAS) gives the whole card to its content, except on an iPad in
     // landscape: the model has its own side there, so it stays beside every tab.
@@ -264,6 +277,7 @@ export function createPanel(root, config, store, { onFocus, onMenu, onModel = ()
       // (the first states arrive while the panel is still being built: refresh it only once it is)
       onStates: (get) => { liveStates = get; if (built) update(); onStates(get); },
       onPlanAC: (id, s, features) => store.applyRemote({ acs: { [id]: s }, features: { [id]: features } }),
+      onOpen: (id) => { if (store.acCfg.has(id)) { haptic('light'); openSheet({ kind: 'ac', id }); } },
       // a pop-up list (the washer's programmes), drawn like the AC's mode menu
       menu: (anchor, items) => openMenu(clip, anchor, items.map((i) => ({ ...i, icon: i.selected ? icon('check', 16, 2.4) : null }))),
     });
@@ -279,11 +293,22 @@ export function createPanel(root, config, store, { onFocus, onMenu, onModel = ()
     // left a strip of empty screen under the panel: the card takes that margin instead (`capped`).
     const NATIVE_PAD = 13 + 34; // `html.native #app` padding, top + bottom (PanelController's padTop/padBottom)
     const capped = () => document.documentElement.classList.toggle('capped', !isPhone && wanted > 0 && innerHeight < wanted + NATIVE_PAD - 1);
+    // The open sheet at its natural height (`bottom: auto` lets it shrink around its content).
+    const sheetHeight = () => {
+      const scrolled = sheet.scrollTop; // measuring it scrolls it back to the top
+      sheet.style.bottom = 'auto';
+      const height = sheet.offsetHeight;
+      sheet.style.bottom = '';
+      sheet.scrollTop = scrolled;
+      return height;
+    };
     const fitHeight = () => {
       const devices = dash.el.parentElement;
       const cs = getComputedStyle(devices);
       const chrome = card.clientHeight - devices.clientHeight;
-      const want = Math.ceil(chrome + parseFloat(cs.paddingTop) + dash.el.offsetHeight + parseFloat(cs.paddingBottom));
+      let want = Math.ceil(chrome + parseFloat(cs.paddingTop) + dash.el.offsetHeight + parseFloat(cs.paddingBottom));
+      // A sheet may need more than the tab (an AC with its readings, a short room): the card grows to it.
+      if (ui.sheet) want = Math.max(want, sheet.offsetTop + sheetHeight());
       if (card.clientHeight && Math.abs(want - wanted) >= 2) { wanted = want; post('panelHeight', { height: want }); }
       capped();
     };
@@ -323,10 +348,17 @@ export function createPanel(root, config, store, { onFocus, onMenu, onModel = ()
 
   let sheetView = null;
 
+  // Taller than the room it has (a short screen, a phone): the sheet scrolls instead of being cut.
+  const sheetFits = () => sheet.classList.toggle('scrolls', sheet.scrollHeight > sheet.clientHeight + 1);
+  new ResizeObserver(sheetFits).observe(sheet);
+
   function openSheet(target) {
     ui.sheet = target;
     sheetView = target.kind === 'ac' ? acSheet(target.id) : lightSheet(target.id);
     sheet.replaceChildren(...sheetView.nodes);
+    sheet.scrollTop = 0;
+    sheetFits();
+    dash?.onLayout?.();
     panel.classList.add('hidden');
     sheet.classList.remove('hidden');
     panel.inert = true;
@@ -346,6 +378,7 @@ export function createPanel(root, config, store, { onFocus, onMenu, onModel = ()
     panel.inert = false;
     sheet.inert = true;
     card.classList.remove('detail');
+    dash?.onLayout?.();
     onFocus(ui.room === 'all' ? null : { kind: 'room', id: ui.room });
     update();
     return true;
@@ -426,6 +459,13 @@ export function createPanel(root, config, store, { onFocus, onMenu, onModel = ()
     const sleep = h('button.option', { onclick: () => { haptic('light'); set({ sleep: !s().sleep }); } },
       icon('moon', 24, 1.6), h('span.corner.dot'), h('div.option-label', 'Sleep'), sleepValue);
     const options = h('div.options', mode.el, fan.el, sleep, swing.el);
+    const details = (extras(id).details || []).map((item) => {
+      const value = h('div.glance-value');
+      return {
+        el: h('div.glance', h('div.glance-label', item.name), h('div.glance-line', value)),
+        update() { value.textContent = formatReading(live(item.entity), item); },
+      };
+    });
 
     return {
       nodes: [
@@ -436,6 +476,7 @@ export function createPanel(root, config, store, { onFocus, onMenu, onModel = ()
           slider.el,
           h('button.round', { 'aria-label': 'Warmer', onclick: () => { haptic('tick'); set({ on: true, target: s().target + 1 }); } }, icon('plus', 18, 2.2))),
         options,
+        ...(details.length ? [h('div.sheet-details', details.map((d) => d.el))] : []),
       ],
       update() {
         const a = s();
@@ -454,6 +495,7 @@ export function createPanel(root, config, store, { onFocus, onMenu, onModel = ()
         mode.update(); fan.update(); swing.update();
         sleep.classList.toggle('active', a.sleep);
         sleepValue.textContent = a.sleep ? 'On' : 'Off';
+        for (const d of details) d.update();
       },
     };
   }

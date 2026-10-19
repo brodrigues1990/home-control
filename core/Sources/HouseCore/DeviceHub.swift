@@ -233,7 +233,12 @@ public final class DeviceHub {
         var lights: [String: Any] = [:], acs: [String: Any] = [:], features: [String: Any] = [:]
         for (id, link) in serviceLinks {
             let reading = readings[link.service]?[link.id]
-            if link.kind == .light, let light = reading?.light, reading?.online != false { lights[id] = light }
+            // An unreachable lamp (unavailable in Home Assistant, unreachable in Hue or Apple Home)
+            // is shown off and offline, not left showing whatever it was last.
+            if link.kind == .light, let reading {
+                if !reading.online { lights[id] = ["on": false, "online": false] }
+                else if var light = reading.light { light["online"] = true; lights[id] = light }
+            }
             if link.kind == .ac {
                 var ac = reading?.online == false ? [:] : reading?.ac ?? [:]
                 if let sensor = link.sensor, let t = readings[sensor.service]?[sensor.id]?.temperature { ac["roomTemp"] = t }
