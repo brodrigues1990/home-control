@@ -73,6 +73,9 @@ final class AppModel {
     @ObservationIgnored private var active = false
     /// A device a widget asked to show before the page was up.
     @ObservationIgnored private var pendingDevice: String?
+    /// The Mac's dashboard.json, as it last sent it: tabs of Home Assistant controls (energy, ACs,
+    /// TVs…) beside the plan's lights. Its entities are all the page may read or call.
+    @ObservationIgnored private var dashboard: Dashboard?
 
     // Floor plan
     private(set) var activePlan: String
@@ -162,6 +165,7 @@ final class AppModel {
         }
         reloadLinks()
         refreshConnections()
+        loadDashboard()
         // A phone paired before plans travelled both ways holds the Mac's plan as it was sent.
         if sync.isPaired, syncedRevision == nil { syncedRevision = plans.customPlanRevision }
 
@@ -243,7 +247,91 @@ final class AppModel {
         boot["smartLife"] = hub.smartLife?.smartLifeInfo
         #endif
         if let device = ProcessInfo.processInfo.environment["HOUSE_OPEN_DEVICE"] { boot["openDevice"] = device }
+        boot["dashboard"] = dashboard?.config
+        // HOUSE_DASH_TAB=<title> opens the dashboard on that tab (screenshots, UI checks).
+        if let tab = ProcessInfo.processInfo.environment["HOUSE_DASH_TAB"] { boot["dashboardTab"] = tab }
         return boot
+    }
+
+    /// Reads the dashboard the Mac sent: what the page may show and call.
+    private func loadDashboard() {
+        dashboard = Dashboard(directory: plans.directory)
+        hub.homeAssistant.dashboardEntities = dashboard?.entities ?? []
+        hub.homeAssistant.onDashboardChange = { [weak self] in self?.web.call("haChanged") }
+    }
+
+    /// Keeps a dashboard that came with a sync, and shows it when it changed.
+    private func adoptDashboard(_ data: Data?) {
+        guard let data, Dashboard(data: data) != nil, data != dashboard?.data else { return }
+        do {
+            try data.write(to: Dashboard.url(in: plans.directory), options: .atomic)
+        } catch { return }
+        loadDashboard()
+        reloadHome()
+    }
+
+    /// The dashboard's own requests: Home Assistant states, history and services, only for
+    /// the entities dashboard.json names (as on the Mac).
+    private func handleDashboard(_ message: [String: Any]) {
+        let allowed = dashboard?.entities ?? []
+        switch message["type"] as? String {
+        case "ha.states":
+            let ids = Set(message["ids"] as? [String] ?? []).intersection(allowed)
+            Task { @MainActor in
+                do { web.reply(to: message, ["states": try await hub.homeAssistant.states(ids)]) }
+                catch { web.reply(to: message, ["error": error.localizedDescription]) }
+            }
+        case "ha.history":
+            let ids = Set(message["ids"] as? [String] ?? []).intersection(allowed)
+            let hours = min(max(message["hours"] as? Double ?? 3, 0.25), 48)
+            Task { @MainActor in
+                do { web.reply(to: message, ["history": try await hub.homeAssistant.history(ids, hours: hours)]) }
+                catch { web.reply(to: message, ["error": error.localizedDescription]) }
+            }
+        case "ha.statistics":
+            // A meter's hours since the month began, at most.
+            let ids = Set(message["ids"] as? [String] ?? []).intersection(allowed)
+            let since = Date(timeIntervalSince1970: (message["since"] as? Double ?? 0) / 1000)
+            let start = max(since, Date().addingTimeInterval(-40 * 86400))
+            Task { @MainActor in
+                do { web.reply(to: message, ["statistics": try await hub.homeAssistant.statistics(ids, since: start)]) }
+                catch { web.reply(to: message, ["error": error.localizedDescription]) }
+            }
+        case "ha.call":
+            let domain = message["domain"] as? String ?? ""
+            let service = message["service"] as? String ?? ""
+            let data = message["data"] as? [String: Any] ?? [:]
+            guard let dashboard, dashboard.allows(domain: domain, service: service, data: data) else {
+                web.reply(to: message, ["error": "\(domain).\(service) is not in dashboard.json"])
+                return
+            }
+            let what = "\(domain).\(service) \(data["entity_id"] as? String ?? "") \(data.filter { $0.key != "entity_id" })"
+            Task { @MainActor in
+                do {
+                    try await hub.homeAssistant.callService(domain: domain, service: service, data: data)
+                    hub.log.write("panel [Home Assistant] \(what) → ok")
+                    web.reply(to: message, ["ok": true])
+                } catch {
+                    hub.log.write("panel [Home Assistant] \(what) → \(error.localizedDescription)")
+                    web.reply(to: message, ["error": error.localizedDescription])
+                }
+            }
+        case "dashboard.open":
+            // Only the links dashboard.json lists.
+            if let text = message["url"] as? String, dashboard?.urls.contains(text) == true, let url = URL(string: text) {
+                UIApplication.shared.open(url)
+            }
+        case "dashboard.copy":
+            if let text = message["text"] as? String, !text.isEmpty, text.count < 2000 { UIPasteboard.general.string = text }
+        case "homeAssistant.open":
+            // The header's home badge: the Home Assistant app when it is installed, else the server.
+            let server = (hub.homeAssistant.info["url"] as? String).flatMap(URL.init(string:))
+            UIApplication.shared.open(URL(string: "homeassistant://navigate/lovelace")!) { opened in
+                if !opened, let server { UIApplication.shared.open(server) }
+            }
+        default:
+            break
+        }
     }
 
     private func handle(_ message: [String: Any]) {
@@ -272,7 +360,7 @@ final class AppModel {
         case "openEditor":
             openEditor()
         default:
-            break
+            handleDashboard(message)
         }
     }
 
@@ -628,6 +716,7 @@ final class AppModel {
             reloadLinks()
             startPolling()
         }
+        adoptDashboard(state.dashboard)
         // Whatever this phone connected (or disconnected) since goes the other way.
         sync.sendConnections(hub.shareableConnections, userCode: smartLifeUserCode)
         sendCatalog()

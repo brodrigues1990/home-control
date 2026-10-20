@@ -280,6 +280,17 @@ export function createPanel(root, config, store, { onFocus, onMenu, onModel = ()
       onOpen: (id) => { if (store.acCfg.has(id)) { haptic('light'); openSheet({ kind: 'ac', id }); } },
       // a pop-up list (the washer's programmes), drawn like the AC's mode menu
       menu: (anchor, items) => openMenu(clip, anchor, items.map((i) => ({ ...i, icon: i.selected ? icon('check', 16, 2.4) : null }))),
+      // each room's section switches only that room's lights: [on, total], and on / off
+      roomLights: {
+        count: (room) => {
+          const mine = config.lights.filter((l) => l.room === room);
+          return [mine.filter((l) => state.lights[l.id].on).length, mine.length];
+        },
+        set: (room, on) => {
+          haptic('medium');
+          for (const l of config.lights) if (l.room === room) store.setLight(l.id, { on });
+        },
+      },
     });
     for (const [id, send] of dash.planACs) store.handlers.set(id, send);
     card.classList.add('has-dash');
@@ -642,6 +653,7 @@ export function createPanel(root, config, store, { onFocus, onMenu, onModel = ()
     listTitle.replaceChildren(h('b', ui.room === 'all' ? 'Whole home' : roomName.get(ui.room)), ` · ${scopedOn} of ${scoped.length} on`);
 
     for (const t of tiles.values()) t.update();
+    dash?.lightsChanged();
     sheetView?.update();
     const m = css(mood());
     card.style.setProperty('--mood', m);

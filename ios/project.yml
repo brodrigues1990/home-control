@@ -56,6 +56,11 @@ targets:
         # Home Assistant answers plain HTTP on the local network, the Hue Bridge HTTPS with its own certificate.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
+          # Home Assistant over Tailscale, by its MagicDNS name: plain HTTP, the tunnel encrypts it.
+          NSExceptionDomains:
+            ts.net:
+              NSIncludesSubdomains: true
+              NSExceptionAllowsInsecureHTTPLoads: true
         NSCameraUsageDescription: The camera reads the pairing code shown by House Control on your Mac.
         CFBundleURLTypes:
           - CFBundleURLName: io.github.0xprobabillity.HouseControl.pair

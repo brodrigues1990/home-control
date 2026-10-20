@@ -50,8 +50,10 @@ const FROM_PLAN_FAN = { auto: 'auto', low: 'low', medium: 'med', high: 'high', t
  * `onPlanAC(id, state, features)`: the real state of an AC of the plan that a dashboard
  * AC stands behind (`"plan": "<ac id>"`).
  * `onOpen(id)`: opens the sheet of that AC of the plan (a click on the card that stands for it).
+ * `roomLights {count(room) -> [on, total], set(room, on)}`: a room's section gets one button for
+ * its lights.
  */
-export function createDashboard(spec, { chips, onTab = () => {}, onStates = () => {}, onPlanAC = () => {}, onOpen = null, menu = null }) {
+export function createDashboard(spec, { chips, onTab = () => {}, onStates = () => {}, onPlanAC = () => {}, onOpen = null, menu = null, roomLights = null }) {
   const planACs = new Map(); // plan AC id -> (patch, current) => Promise: the panel's AC sheet, sent to the remote
   const ha = {}; // entity id -> { state, attributes, last_updated }
   const assumed = new Map(); // entity id -> { state?, attributes?, at }
@@ -964,6 +966,23 @@ export function createDashboard(spec, { chips, onTab = () => {}, onStates = () =
   /* ---------- layout ---------- */
 
   const charts = []; // { pane, widget } with history to read while their tab shows
+  const roomPowers = []; // the rooms' light buttons, redrawn when a light changes
+
+  function roomPower(room) {
+    const count = h('span');
+    const b = h('button.dash-room-power', { title: 'Lights of this room on / off', onclick: (e) => {
+      e.stopPropagation();
+      roomLights.set(room, roomLights.count(room)[0] === 0);
+    } }, icon('power', 11, 2.6), count);
+    const draw = () => {
+      const [on, total] = roomLights.count(room);
+      b.classList.toggle('on', on > 0);
+      count.textContent = `${on}/${total}`;
+    };
+    draw();
+    roomPowers.push(draw);
+    return b;
+  }
   function buildSection(section, pane) {
     const note = h('span.dash-note');
     const body = h('div.dash-sec-grid');
@@ -981,7 +1000,9 @@ export function createDashboard(spec, { chips, onTab = () => {}, onStates = () =
     if (section.temperature) {
       updaters.push({ update() { const t = num(state(section.temperature)); note.textContent = t != null ? `${t.toFixed(1)}°` : ''; } });
     }
-    const sec = h('section.dash-sec', h('div.dash-title', h('span', section.title || ''), note), body);
+    // A section for a room gets one button for that room's lights: on when none is, off otherwise.
+    const lit = section.room && roomLights?.count(section.room)[1] ? roomPower(section.room) : null;
+    const sec = h('section.dash-sec', h('div.dash-title', h('span', section.title || ''), note, lit), body);
     if (filtered(section)) roomAware.push({ el: sec, spec: section });
     return sec;
   }
@@ -1067,5 +1088,7 @@ export function createDashboard(spec, { chips, onTab = () => {}, onStates = () =
       showCharts();
       this.onLayout?.();
     },
+    /** A plan light changed: the rooms' light buttons follow. */
+    lightsChanged() { for (const draw of roomPowers) draw(); },
   };
 }

@@ -3,7 +3,8 @@
 An optional `dashboard.json` in the data folder (`~/Library/Application Support/HouseControl/`) turns the panel's
 device grid into tabs of Home Assistant controls: a fan or an infrared AC driven by scripts, media players, status
 rows, charts and links, laid out beside the plan's own lights. Without the file the panel is unchanged.
-Use **Reload** in the menu (or relaunch) after editing it. Ported from a friend's fork, [asantos](https://github.com/alsantos123/house-control-asantos).
+Use **Reload** in the menu (or relaunch) after editing it. A paired iPhone receives it with the plan and shows the same tabs,
+under the same allowlist. Ported from a friend's fork, [asantos](https://github.com/alsantos123/house-control-asantos).
 
 ## Safety
 
@@ -23,6 +24,9 @@ The top level holds `panel {width, height}`, `watch` (extra entities the 3D mode
 for example `sun.sun`, `sensor.office_vent_status`, the C2, and
 `binary_sensor.pc_gamer_online`), `tabs: [{title, model?, sections: [{title,
 temperature?, widgets: [...]}]}]` and `devices` (extras for the plan's own devices, by their ids in the plan).
+
+A section with a `room` (a plan room id) gets one button for that room's lights in its title: on / total, a tap
+turns them on when none is lit, off otherwise.
 
 `devices: {"<plan AC id>": {watts, details}}`: an AC's card keeps to power, temperature and `watts` (the sensor
 of its draw, shown while it runs); `details` (`glance` items) are listed in its sheet, under its controls.

@@ -373,3 +373,14 @@ html.ios .dash .chip { min-height: 60px; }
 
 /* a plug that is unplugged or off the network */
 .dash-card.gone { opacity: 0.55; }
+
+/* a room section's one button for its lights */
+.dash-room-power {
+  margin-left: auto; align-self: center;
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 22px; padding: 0 9px; border-radius: 11px;
+  font: inherit; font-size: 10px; letter-spacing: 0.02em; font-variant-numeric: tabular-nums;
+  color: var(--muted); background: var(--glass); border: 1px solid var(--line); cursor: pointer;
+  transition: background 200ms, color 200ms, border-color 200ms;
+}
+.dash-room-power.on { color: #ffd59a; background: rgba(255, 189, 122, 0.14); border-color: rgba(255, 189, 122, 0.4); }
