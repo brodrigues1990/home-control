@@ -1,10 +1,10 @@
 /* The panel's dashboard (dashboard.json): sections of Home Assistant controls and the plan's
-   lights, in place of the scenes and device grid. The room filter and the "All on / All off"
-   row stay, as on the iPhone. */
+   lights, in place of the scenes and device grid. The room filter stays; the "Whole home ·
+   All on / All off" row goes, since each room's section has its own lights button. */
 
 .card.has-dash { --stage-h: 430px; }
 .card.has-dash .scenes { display: none; }
-.card.has-dash .list-head { margin-bottom: 0; }
+.card.has-dash .list-head { display: none; }
 .card.has-dash .devices { padding-top: 10px; }
 
 .dash { display: flex; flex-direction: column; gap: 14px; }
@@ -13,7 +13,7 @@
   display: flex; align-items: baseline; gap: 8px;
   margin: 0 4px;
   font-size: 10.5px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase;
-  color: var(--faint);
+  color: var(--text);
 }
 .dash-note { text-transform: none; letter-spacing: 0; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
 .dash-sec-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
