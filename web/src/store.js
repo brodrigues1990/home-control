@@ -69,6 +69,32 @@ export function createStore(config) {
   const COOL_DOWN = { light: 300, ac: 900 };
   const outbox = new Map();
 
+  // A device report can be older than a change made here: the cloud behind Home Assistant
+  // takes a few seconds to confirm a switch, and a read in between flipped the button back
+  // for a moment. Until the device confirms (or SETTLE passes), the change made here stands.
+  const SETTLE = 10000;
+  const awaiting = new Map(); // device id -> { values: {key: value}, until }
+
+  function expect(id, diff) {
+    const wait = awaiting.get(id) || { values: {} };
+    Object.assign(wait.values, diff);
+    wait.until = performance.now() + SETTLE;
+    awaiting.set(id, wait);
+  }
+
+  // Leaves out of a device report what contradicts a change still settling.
+  function holdUnconfirmed(id, clean) {
+    const wait = awaiting.get(id);
+    if (!wait) return;
+    if (performance.now() > wait.until) { awaiting.delete(id); return; }
+    for (const [key, value] of Object.entries(wait.values)) {
+      if (!(key in clean)) continue;
+      if (clean[key] === value) delete wait.values[key];
+      else delete clean[key];
+    }
+    if (!Object.keys(wait.values).length) awaiting.delete(id);
+  }
+
   function transmit(kind, id, patch) {
     const current = kind === 'light' ? state.lights[id] : state.acs[id];
     // A device the dashboard drives itself (an infrared AC behind a script).
@@ -113,6 +139,7 @@ export function createStore(config) {
       if (entry.pending && key in entry.pending) { entry.before[key] = before[key]; continue; }
       if (current[key] !== patch[key]) continue; // a real device reported something newer
       current[key] = before[key];
+      if (awaiting.has(id)) delete awaiting.get(id).values[key];
       any = true;
     }
     if (any) emit({ type: kind, id, reverted: true });
@@ -131,30 +158,36 @@ export function createStore(config) {
     return out;
   }
 
-  function writeLight(id, patch, { remote = false } = {}) {
+  // `reported`: what a real device says (applyRemote); `remote` alone is another view of this
+  // home (adopt), whose change is as fresh as one made here.
+  function writeLight(id, patch, { remote = false, reported = false } = {}) {
     const cur = state.lights[id];
     if (!cur) return false;
     const clean = sanitizeLight(id, patch, remote);
+    if (reported) holdUnconfirmed(id, clean);
     // Only what actually changed is worth sending to the device.
     const diff = Object.fromEntries(Object.entries(clean).filter(([k, v]) => cur[k] !== v));
     if (!Object.keys(diff).length) return false;
     const before = Object.fromEntries(Object.keys(diff).map((k) => [k, cur[k]]));
     Object.assign(cur, clean);
+    if (!reported) expect(id, diff);
     if (!remote) dispatch('light', id, diff, before);
     return true;
   }
 
-  function writeAC(id, patch, { remote = false } = {}) {
+  function writeAC(id, patch, { remote = false, reported = false } = {}) {
     const cur = state.acs[id];
     const cfg = acCfg.get(id);
     if (!cur) return false;
     const clean = { ...patch };
     if ('target' in clean) clean.target = clamp(Math.round(clean.target), cfg.min, cfg.max);
+    if (reported) holdUnconfirmed(id, clean);
     const diff = Object.fromEntries(Object.entries(clean).filter(([k, v]) => cur[k] !== v));
     if (!Object.keys(diff).length) return false;
     const before = Object.fromEntries(Object.keys(diff).map((k) => [k, cur[k]]));
     Object.assign(cur, clean);
     const { roomTemp, ...sendable } = diff;
+    if (!reported && Object.keys(sendable).length) expect(id, sendable);
     if (!remote && Object.keys(sendable).length) dispatch('ac', id, sendable, before);
     return true;
   }
@@ -241,8 +274,8 @@ export function createStore(config) {
     // State reported by real devices (native provider). Never echoed back as a command.
     applyRemote(update) {
       let any = false;
-      for (const [id, patch] of Object.entries(update.lights || {})) any = writeLight(id, patch, { remote: true }) || any;
-      for (const [id, patch] of Object.entries(update.acs || {})) any = writeAC(id, patch, { remote: true }) || any;
+      for (const [id, patch] of Object.entries(update.lights || {})) any = writeLight(id, patch, { remote: true, reported: true }) || any;
+      for (const [id, patch] of Object.entries(update.acs || {})) any = writeAC(id, patch, { remote: true, reported: true }) || any;
       for (const [id, f] of Object.entries(update.features || {})) {
         if (!state.acs[id] || JSON.stringify(features[id]) === JSON.stringify(f)) continue;
         features[id] = f;
